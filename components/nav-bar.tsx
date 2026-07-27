@@ -39,6 +39,12 @@ export async function NavBar() {
                 分类
               </Link>
               <Link
+                href="/reports"
+                className="text-zinc-600 hover:text-zinc-900 transition-colors"
+              >
+                报表
+              </Link>
+              <Link
                 href="/settings"
                 className="text-zinc-400 hover:text-zinc-900 transition-colors"
               >

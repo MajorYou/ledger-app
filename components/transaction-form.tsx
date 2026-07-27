@@ -94,6 +94,7 @@ export function TransactionForm({
   const handleClassify = useCallback(async () => {
     const merchant = (document.querySelector('input[name="merchant"]') as HTMLInputElement)?.value || ''
     const description = (document.querySelector('input[name="description"]') as HTMLInputElement)?.value || ''
+    const timeInput = (document.querySelector('input[name="transactionTime"]') as HTMLInputElement)?.value || ''
 
     if (!amountStr || parseFloat(amountStr) <= 0) return
 
@@ -107,6 +108,7 @@ export function TransactionForm({
           description,
           amount: parseFloat(amountStr),
           type,
+          transactionTime: timeInput || undefined,
         }),
       })
       const data = await res.json()

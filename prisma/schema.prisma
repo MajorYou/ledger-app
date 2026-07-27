@@ -55,7 +55,7 @@ model Account {
 // ---- 账本（支持层级） ----
 model Ledger {
   id        String    @id @default(cuid())
-  name      String
+  name      String    @unique
   parentId  String?
   parent    Ledger?   @relation("LedgerHierarchy", fields: [parentId], references: [id])
   children  Ledger[]  @relation("LedgerHierarchy")

@@ -39,6 +39,11 @@ export async function createTransaction(_prevState: unknown, formData: FormData)
     },
   })
 
+  // 创建时已选分类 → 触发自动学习
+  if (merchant && categoryId) {
+    await autoLearnCategory(merchant, categoryId)
+  }
+
   revalidatePath('/')
   revalidatePath('/transactions')
   return { success: true, id: transaction.id }
@@ -101,16 +106,52 @@ export async function deleteTransaction(id: string) {
 export async function confirmCategory(
   transactionId: string,
   categoryId: string
-) {
+): Promise<{ success: boolean; learned?: boolean }> {
   const user = await getSession()
   if (!user) throw new Error('Unauthorized')
 
-  await prisma.transaction.update({
+  const tx = await prisma.transaction.update({
     where: { id: transactionId },
     data: { categoryId, isConfirmed: true },
   })
 
+  // 自动学习
+  let learned = false
+  if (tx.merchant) {
+    learned = await autoLearnCategory(tx.merchant, categoryId)
+  }
+
   revalidatePath('/')
   revalidatePath('/transactions')
-  return { success: true }
+  return { success: true, learned }
+}
+
+// 自动学习：统计商户被确认到同一分类的次数，≥3 写入缓存。返回是否触发了学习
+async function autoLearnCategory(merchant: string, categoryId: string): Promise<boolean> {
+  const count = await prisma.transaction.count({
+    where: {
+      merchant,
+      categoryId,
+      isConfirmed: true,
+    },
+  })
+
+  if (count >= 3) {
+    await prisma.classificationCache.upsert({
+      where: { merchantPattern: merchant },
+      update: {
+        suggestedCategoryId: categoryId,
+        confidence: Math.min(count / 5, 1),
+        hitCount: count,
+      },
+      create: {
+        merchantPattern: merchant,
+        suggestedCategoryId: categoryId,
+        confidence: 0.8,
+        hitCount: count,
+      },
+    })
+    return true
+  }
+  return false
 }

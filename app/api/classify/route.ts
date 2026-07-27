@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { classifyTransaction } from '@/lib/ai/classifier'
 import { getSession } from '@/lib/auth'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   const user = await getSession()
@@ -10,7 +11,9 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { merchant, description, amount, type } = body
+    const { merchant, description, amount, type, transactionTime } = body
+
+    logger.info('classify:request', { merchant, amount, type, transactionTime })
 
     if (!amount || !type) {
       return NextResponse.json({ error: '缺少必要参数' }, { status: 400 })
@@ -21,11 +24,13 @@ export async function POST(request: NextRequest) {
       description: description || '',
       amount: parseFloat(amount),
       type,
+      transactionTime: transactionTime || undefined,
     })
 
+    logger.info('classify:result', result)
     return NextResponse.json(result)
   } catch (error) {
-    console.error('Classification API error:', error)
+    logger.error('classify:error', error instanceof Error ? error.message : String(error))
     return NextResponse.json(
       { error: '分类失败' },
       { status: 500 }

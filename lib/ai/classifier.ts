@@ -34,6 +34,7 @@ export async function classifyTransaction(
     description: string
     amount: number
     type: string
+    transactionTime?: string
   }
 ): Promise<ClassifyResult | null> {
   try {
@@ -81,16 +82,57 @@ export async function classifyTransaction(
         }
       })
 
-    const prompt = `你是一个记账分类助手。根据以下交易信息，选择最合适的分类。
+    // 构建时间提示
+    let timeHint = ''
+    if (transaction.transactionTime) {
+      const date = new Date(transaction.transactionTime)
+      const hour = date.getHours()
+      const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
+      const timeStr = date.toLocaleString('zh-CN')
 
-已有分类树（${transaction.type === 'expense' ? '支出' : '收入'}）：
+      if (hour >= 6 && hour < 10) {
+        timeHint = `\n- 交易时间：${timeStr} (${weekday}，早上时段，可能是早餐)`
+      } else if (hour >= 11 && hour < 14) {
+        timeHint = `\n- 交易时间：${timeStr} (${weekday}，午餐时段)`
+      } else if (hour >= 17 && hour < 21) {
+        timeHint = `\n- 交易时间：${timeStr} (${weekday}，晚餐时段)`
+      } else if (hour >= 14 && hour < 17) {
+        timeHint = `\n- 交易时间：${timeStr} (${weekday}，下午茶时段)`
+      } else if (hour >= 21 || hour < 6) {
+        timeHint = `\n- 交易时间：${timeStr} (${weekday}，夜间时段，可能是夜宵/娱乐)`
+      } else {
+        timeHint = `\n- 交易时间：${timeStr} (${weekday})`
+      }
+    }
+
+    const prompt = `你是一个记账分类助手。你必须从已有分类树中选择最具体的子分类（叶子节点），而不是父分类。
+
+已有分类树（${transaction.type === 'expense' ? '支出' : '收入'}，带 children 的是父分类，无 children 或 children 为空的才是应该选的子分类）：
 ${JSON.stringify(categoryTree, null, 2)}
 
 交易信息：
 - 商户：${transaction.merchant || '未知'}
 - 描述：${transaction.description || '无'}
-- 金额：¥${transaction.amount}
+- 金额：¥${transaction.amount}${timeHint}
 - 类型：${transaction.type === 'expense' ? '支出' : '收入'}
+
+【必须遵守的分类规则】
+1. 优先选择最底层的子分类（叶子节点），不要选有 children 的父分类
+2. 餐饮相关 → 必须根据时间选具体子分类：
+   - 早餐(6-10点) → 三餐
+   - 午餐(11-14点) → 三餐
+   - 晚餐(17-21点) → 三餐
+   - 夜宵(21-6点) → 三餐
+   - 如果明显是小吃/奶茶/咖啡 → 零食饮料
+   - 多人或高金额(>100) → 聚餐
+   - 外卖平台(美团/饿了么) → 外卖
+3. 交通相关 → 必须选具体子分类：
+   - 公交/地铁 → 公共交通
+   - 滴滴/出租车 → 打车
+   - 加油站/充电 → 加油
+   - 停车场 → 停车
+4. 购物相关 → 日用/服饰/数码 按商品类型选子分类
+5. 住房相关 → 房租/水电/物业 按费用类型选子分类
 
 请返回 JSON 格式（不要包含其他内容）：
 {

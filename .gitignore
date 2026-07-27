@@ -41,6 +41,9 @@ yarn-error.log*
 # ---- 测试产物 ----
 /coverage
 
+# ---- 应用日志 ----
+/logs/
+
 # ---- 部署平台缓存 ----
 .vercel
 .netlify

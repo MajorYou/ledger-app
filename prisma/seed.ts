@@ -10,11 +10,16 @@ function sha256(text: string): string {
 async function main() {
   console.log('Seeding database...')
 
+  // 检查是否已有数据，避免重复
+  const existingUser = await prisma.user.count()
+  if (existingUser > 0) {
+    console.log('Database already has data, skipping seed.')
+    return
+  }
+
   // 创建默认家庭主用户
-  const host = await prisma.user.upsert({
-    where: { email: 'admin@ledger.local' },
-    update: {},
-    create: {
+  const host = await prisma.user.create({
+    data: {
       name: '家庭管理员',
       email: 'admin@ledger.local',
       passwordHash: sha256('123456'),
@@ -24,31 +29,14 @@ async function main() {
   console.log('Created host user:', host.email)
 
   // 创建默认账本
-  const defaultLedger = await prisma.ledger.create({
-    data: {
-      name: '日常账本',
-      type: 'daily',
-      color: '#3b82f6',
-    },
+  const dl = await prisma.ledger.create({ data: { name: '日常账本', type: 'daily', color: '#3b82f6' } })
+  const tp = await prisma.ledger.create({ data: { name: '旅行', type: 'travel', color: '#f59e0b' } })
+  await prisma.ledger.createMany({
+    data: [
+      { name: '2025 日本行', type: 'travel', color: '#ef4444', parentId: tp.id },
+      { name: '旅游', type: 'travel', color: '#8b5cf6' },
+    ],
   })
-
-  const travelParent = await prisma.ledger.create({
-    data: {
-      name: '旅行',
-      type: 'travel',
-      color: '#f59e0b',
-    },
-  })
-
-  await prisma.ledger.create({
-    data: {
-      name: '2025 日本行',
-      type: 'travel',
-      color: '#ef4444',
-      parentId: travelParent.id,
-    },
-  })
-
   console.log('Created default ledgers')
 
   // 创建默认分类（支出）
@@ -88,14 +76,10 @@ async function main() {
 
   for (const cat of expenseCategories) {
     const { children, ...parentData } = cat
-    const parent = await prisma.category.create({
-      data: { ...parentData, type: 'expense' },
-    })
+    const parent = await prisma.category.create({ data: { ...parentData, type: 'expense' } })
     if (children) {
       for (const child of children) {
-        await prisma.category.create({
-          data: { ...child, type: 'expense', parentId: parent.id },
-        })
+        await prisma.category.create({ data: { ...child, type: 'expense', parentId: parent.id } })
       }
     }
   }
@@ -108,41 +92,19 @@ async function main() {
     { name: '兼职', icon: '💼', color: '#4ade80' },
     { name: '其他收入', icon: '💵', color: '#86efac' },
   ]
-
   for (const cat of incomeCategories) {
-    await prisma.category.create({
-      data: { ...cat, type: 'income' },
-    })
+    await prisma.category.create({ data: { ...cat, type: 'income' } })
   }
-
   console.log('Created default categories')
 
   // 创建默认账户
-  await prisma.account.create({
-    data: {
-      userId: host.id,
-      name: '现金',
-      type: 'general',
-      currency: 'CNY',
-    },
+  await prisma.account.createMany({
+    data: [
+      { userId: host.id, name: '现金', type: 'general', currency: 'CNY' },
+      { userId: host.id, name: '支付宝', type: 'ewallet', currency: 'CNY' },
+      { userId: host.id, name: '微信支付', type: 'ewallet', currency: 'CNY' },
+    ],
   })
-  await prisma.account.create({
-    data: {
-      userId: host.id,
-      name: '支付宝',
-      type: 'ewallet',
-      currency: 'CNY',
-    },
-  })
-  await prisma.account.create({
-    data: {
-      userId: host.id,
-      name: '微信支付',
-      type: 'ewallet',
-      currency: 'CNY',
-    },
-  })
-
   console.log('Created default accounts')
 
   console.log('Seed completed!')

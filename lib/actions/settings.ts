@@ -48,3 +48,8 @@ export async function loadAllSettings(): Promise<Record<string, string>> {
   }
   return result
 }
+
+export async function deleteRule(id: string): Promise<void> {
+  await prisma.classificationCache.delete({ where: { id } })
+  revalidatePath('/settings')
+}

@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---- 用户 ----
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  passwordHash String
+  isFamilyHost Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  accounts       Account[]
+  transactions   Transaction[]
+  createdInvites FamilyInvite[] @relation("InviteCreator")
+  usedInvite     FamilyInvite?  @relation("InviteUsedBy")
+}
+
+// ---- 家庭邀请码 ----
+model FamilyInvite {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  creatorId String
+  creator   User     @relation("InviteCreator", fields: [creatorId], references: [id])
+  usedById  String?  @unique
+  usedBy    User?    @relation("InviteUsedBy", fields: [usedById], references: [id])
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+}
+
+// ---- 支付账户 ----
+model Account {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  name      String
+  type      String   @default("general") // general / credit / debit / ewallet
+  currency  String   @default("CNY")
+  balance   Float    @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions Transaction[]
+}
+
+// ---- 账本（支持层级） ----
+model Ledger {
+  id        String    @id @default(cuid())
+  name      String
+  parentId  String?
+  parent    Ledger?   @relation("LedgerHierarchy", fields: [parentId], references: [id])
+  children  Ledger[]  @relation("LedgerHierarchy")
+  type      String    @default("daily") // daily / travel / project / annual
+  color     String    @default("#3b82f6")
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  transactionLedgers TransactionLedger[]
+}
+
+// ---- 分类（支持层级） ----
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  type      String     @default("expense") // expense / income
+  parentId  String?
+  parent    Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryHierarchy")
+  icon      String     @default("📦")
+  color     String     @default("#6b7280")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  transactions       Transaction[]
+  classificationCache ClassificationCache[]
+}
+
+// ---- 交易记录 ----
+model Transaction {
+  id              String    @id @default(cuid())
+  type            String    @default("expense") // expense / income / transfer
+  amount          Float
+  merchant        String    @default("")
+  description     String    @default("")
+  transactionTime DateTime  @default(now())
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id])
+  accountId       String?
+  account         Account?  @relation(fields: [accountId], references: [id])
+  createdById     String
+  createdBy       User      @relation(fields: [createdById], references: [id])
+  isConfirmed     Boolean   @default(true)
+  llmClassified   Boolean   @default(false)
+  duplicateGroupId String?
+  importRecordId  String?
+  importRecord    ImportRecord? @relation(fields: [importRecordId], references: [id])
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  transactionLedgers TransactionLedger[]
+}
+
+// ---- 交易↔账本 多对多 ----
+model TransactionLedger {
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  ledgerId      String
+  ledger        Ledger      @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+
+  @@unique([transactionId, ledgerId])
+}
+
+// ---- 导入记录 ----
+model ImportRecord {
+  id              String   @id @default(cuid())
+  sourceType      String   // csv / pdf / manual
+  fileName        String?
+  rawContentHash  String?
+  parsedJson      String?
+  createdAt       DateTime @default(now())
+
+  transactions Transaction[]
+}
+
+// ---- AI 分类缓存 ----
+model ClassificationCache {
+  id                  String   @id @default(cuid())
+  merchantPattern     String
+  suggestedCategoryId String
+  category            Category @relation(fields: [suggestedCategoryId], references: [id])
+  confidence          Float    @default(0)
+  hitCount            Int      @default(1)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([merchantPattern])
+}
+
+// ---- 系统设置（键值对） ----
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}

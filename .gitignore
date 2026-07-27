@@ -1,6 +1,8 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# ============================================================
+# 只追踪源代码，以下全部排除
+# ============================================================
 
-# dependencies
+# ---- 依赖 (由 package.json 管理) ----
 /node_modules
 /.pnp
 .pnp.*
@@ -10,32 +12,46 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# ---- 构建产物 ----
 /.next/
 /out/
-
-# production
 /build
+/.turbo
 
-# misc
-.DS_Store
-*.pem
+# ---- Next.js 自动生成 ----
+next-env.d.ts
 
-# debug
+# ---- TypeScript 编译缓存 ----
+*.tsbuildinfo
+
+# ---- 环境变量 & 密钥 ----
+.env*
+!.env.example
+
+# ---- SQLite 数据库（含用户数据、设置、API Key） ----
+prisma/*.db
+prisma/*.db-journal
+
+# ---- 日志 ----
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# ---- 测试产物 ----
+/coverage
 
-# vercel
+# ---- 部署平台缓存 ----
 .vercel
+.netlify
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# ---- 系统文件 ----
+.DS_Store
+Thumbs.db
+*.pem
+
+# ---- IDE 配置 ----
+.idea/
+.vscode/
+*.swp
+*.swo

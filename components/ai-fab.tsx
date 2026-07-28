@@ -59,10 +59,11 @@ function AiPanel({ onClose }: { onClose: () => void }) {
 
 function AiChat() {
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string; preview?: unknown }>>([
-    { role: 'ai', content: '你好！我是记账助手，你可以直接跟我说：\n\n• "今天午饭麦当劳 35"\n• "昨晚打车 28"\n• "把上周餐饮挪到旅行账本"\n\n我会帮你记账或整理账单 👇' },
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string; preview?: unknown; isDelete?: boolean; deleteIds?: string[] }>>([
+    { role: 'ai', content: '你好！我是记账助手，你可以直接跟我说：\n\n• "今天午饭麦当劳 35"\n• "昨晚打车 28"\n• "把上周餐饮挪到旅行账本"\n• "删除本月所有停车记录"\n\n我会帮你记账或整理账单 👇' },
   ])
   const [loading, setLoading] = useState(false)
+  const [confirmedIdx, setConfirmedIdx] = useState<number | null>(null)
 
   const handleSend = async () => {
     if (!input.trim() || loading) return
@@ -93,6 +94,8 @@ function AiChat() {
         return
       }
 
+      // 检测是否是删除操作
+      const isDelete = result.parsed.operations.some((op: { type: string }) => op.type === 'delete_transactions')
 
       let previewText = result.parsed.explanation + '\n\n'
       if (preview.newTransactions.length > 0) {
@@ -102,7 +105,11 @@ function AiChat() {
         })
       }
       if (preview.preview.length > 0) {
-        previewText += `🔄 将修改 ${preview.preview.length} 笔：\n`
+        if (isDelete) {
+          previewText += `🗑 将删除 ${preview.preview.length} 笔：\n`
+        } else {
+          previewText += `🔄 将修改 ${preview.preview.length} 笔：\n`
+        }
         preview.preview.slice(0, 5).forEach((tx) => {
           previewText += `  • ${tx.merchant} ¥${tx.amount.toFixed(2)} → ${tx.changes.join(', ')}\n`
         })
@@ -110,8 +117,9 @@ function AiChat() {
 
       setMessages((prev) => [...prev, {
         role: 'ai',
-        content: previewText + '\n需要我执行吗？',
+        content: previewText + (isDelete ? '\n⚠️ 删除不可撤销，确认执行吗？' : '\n需要我执行吗？'),
         preview: { filters: result.parsed.filters, operations: result.parsed.operations },
+        isDelete,
       }])
 
     } catch (err) {
@@ -120,12 +128,13 @@ function AiChat() {
     setLoading(false)
   }
 
-  const handleConfirm = async (filters: unknown, operations: unknown) => {
+  const handleConfirm = async (msgIndex: number, filters: unknown, operations: unknown) => {
     setLoading(true)
     try {
       const { executeAdjust } = await import('@/lib/actions/batch-adjust')
       await executeAdjust(filters as any, operations as any)
-      setMessages((prev) => [...prev, { role: 'ai', content: '✅ 已完成！' }])
+      // 原地标记已确认，移除按钮
+      setConfirmedIdx(msgIndex)
     } catch {
       setMessages((prev) => [...prev, { role: 'ai', content: '⚠️ 执行失败' }])
     }
@@ -145,15 +154,22 @@ function AiChat() {
               }`}
             >
               {msg.content}
-              {msg.preview ? (
+              {msg.preview && confirmedIdx !== i ? (
                 <button
-                  onClick={() => handleConfirm((msg.preview as any).filters, (msg.preview as any).operations)}
+                  onClick={() => handleConfirm(i, (msg.preview as any).filters, (msg.preview as any).operations)}
                   disabled={loading}
-                  className="mt-2 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 disabled:opacity-50 w-full"
+                  className={`mt-2 px-3 py-1.5 text-white rounded-lg text-xs font-medium disabled:opacity-50 w-full ${
+                    msg.isDelete
+                      ? 'bg-red-600 hover:bg-red-700'
+                      : 'bg-green-600 hover:bg-green-700'
+                  }`}
                 >
-                  {loading ? '处理中...' : '✓ 确认执行'}
+                  {loading ? '处理中...' : msg.isDelete ? '⚠️ 确认删除' : '✓ 确认执行'}
                 </button>
               ) : null}
+              {confirmedIdx === i && (
+                <p className="mt-2 text-xs text-green-600 font-medium">✅ 已完成！</p>
+              )}
             </div>
           </div>
         ))}

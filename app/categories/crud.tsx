@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useActionState } from 'react'
 import { createCategory, updateCategory, deleteCategory } from '@/lib/actions/categories'
 
 const ICONS = ['🍽️','🚗','🛒','🏠','🎮','🏥','📚','📞','💼','💰','🎁','📈','💵','📦','✈️','👔','📱','🧴']
@@ -185,6 +186,15 @@ function CategoryForm({
   const [selectedIcon, setSelectedIcon] = useState(editing?.icon || '📦')
   const [selectedColor, setSelectedColor] = useState(editing?.color || '#6b7280')
 
+  const action = editing
+    ? updateCategory.bind(null, editing.id)
+    : createCategory
+  const [state, formAction, isPending] = useActionState(action, null)
+
+  useEffect(() => {
+    if (state?.success) onSaved()
+  }, [state, onSaved])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
@@ -197,7 +207,7 @@ function CategoryForm({
           </button>
         </div>
         <form
-          action={editing ? updateCategory.bind(null, editing.id) : createCategory}
+          action={formAction}
           className="space-y-4"
         >
           <input type="hidden" name="icon" value={selectedIcon} />
@@ -291,10 +301,10 @@ function CategoryForm({
 
           <button
             type="submit"
-            onClick={onSaved}
-            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            disabled={isPending}
+            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
-            {editing ? '更新' : '创建'}
+            {isPending ? '保存中...' : editing ? '更新' : '创建'}
           </button>
         </form>
       </div>

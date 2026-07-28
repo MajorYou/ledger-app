@@ -27,7 +27,7 @@ interface ParsedOperation {
     keyword?: string
   }
   operations: Array<{
-    type: 'move_ledger' | 'reclassify' | 'update_type' | 'update_merchant' | 'create_transaction'
+    type: 'move_ledger' | 'reclassify' | 'update_type' | 'update_merchant' | 'create_transaction' | 'delete_transactions'
     targetLedger?: string
     targetCategory?: string
     newValue?: string
@@ -90,7 +90,7 @@ export async function parseNaturalLanguage(
   },
   "operations": [
     {
-      "type": "move_ledger"|"reclassify"|"update_type"|"update_merchant"|"create_transaction",
+      "type": "move_ledger"|"reclassify"|"update_type"|"update_merchant"|"create_transaction"|"delete_transactions",
       "targetLedger": "目标账本" 仅 move_ledger,
       "targetCategory": "目标分类" 仅 reclassify,
       "newValue": "新值" 仅 update_type/update_merchant,
@@ -134,7 +134,13 @@ export async function parseNaturalLanguage(
 
 修改交易规则：
 - "上周" → 上周一到上周日；"本月" → 本月1日到今天
-- 匹配分类/账本时用模糊匹配。找不到匹配时填 null。`
+- 匹配分类/账本时用模糊匹配。找不到匹配时填 null。
+
+删除交易规则：
+- 当用户明确说"删除/删掉/清除"交易时 → type 用 "delete_transactions"
+- "删除所有停车记录" → filters: { keyword: "停车" }, operations: [{ type: "delete_transactions" }]
+- "删除上个月所有外卖" → filters: { dateRange: 上月, keyword: "外卖" }, operations: [{ type: "delete_transactions" }]
+- 删除操作必须精确匹配用户意图，不可扩大范围`
 
   const response = await client.chat.completions.create({
     model,
@@ -271,6 +277,8 @@ export async function dryRunAdjust(
         changes.push(`账本 → ${op.targetLedger}`)
       } else if (op.type === 'reclassify' && op.targetCategory) {
         changes.push(`分类 → ${op.targetCategory}`)
+      } else if (op.type === 'delete_transactions') {
+        changes.push('🗑 删除')
       }
     }
     return {
@@ -358,7 +366,7 @@ export async function executeAdjust(
         let ledger = await prisma.ledger.findFirst({
           where: { name: { contains: op.targetLedger } },
         })
-        // 找不到则 upsert（自动创建，已有则复用）
+        // 找不到则 upsert
         ledger = await prisma.ledger.upsert({
           where: { name: op.targetLedger },
           update: {},
@@ -372,6 +380,11 @@ export async function executeAdjust(
           update: {},
           create: { transactionId: tx.id, ledgerId: ledger.id },
         })
+      }
+
+      if (op.type === 'delete_transactions') {
+        await prisma.transaction.delete({ where: { id: tx.id } })
+        logger.info('batch-adjust:deleted', { id: tx.id, merchant: tx.merchant })
       }
 
       if (op.type === 'reclassify' && op.targetCategory) {

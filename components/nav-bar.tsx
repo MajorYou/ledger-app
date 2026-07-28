@@ -27,6 +27,12 @@ export async function NavBar() {
                 交易记录
               </Link>
               <Link
+                href="/import"
+                className="text-zinc-600 hover:text-zinc-900 transition-colors"
+              >
+                导入
+              </Link>
+              <Link
                 href="/ledgers"
                 className="text-zinc-600 hover:text-zinc-900 transition-colors"
               >
@@ -43,6 +49,12 @@ export async function NavBar() {
                 className="text-zinc-600 hover:text-zinc-900 transition-colors"
               >
                 报表
+              </Link>
+              <Link
+                href="/dedup"
+                className="text-zinc-600 hover:text-zinc-900 transition-colors"
+              >
+                去重
               </Link>
               <Link
                 href="/settings"

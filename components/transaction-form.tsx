@@ -1,7 +1,8 @@
 'use client'
 
 import { createTransaction, updateTransaction } from '@/lib/actions/transactions'
-import { useActionState, useState, useEffect, useCallback } from 'react'
+import { useActionState, useState, useEffect, useCallback, useMemo } from 'react'
+import { SearchableSelect } from '@/components/searchable-select'
 
 interface Category {
   id: string
@@ -84,6 +85,25 @@ export function TransactionForm({
   const expenseCategories = categories.filter((c) => c.type === 'expense')
   const incomeCategories = categories.filter((c) => c.type === 'income')
   const visibleCategories = type === 'expense' ? expenseCategories : incomeCategories
+
+  // 构建可搜索下拉的选项
+  const categoryOptions = useMemo(() => {
+    const opts: Array<{ value: string; label: string; group?: string }> = []
+    const parents = visibleCategories.filter((c) => !c.parentId)
+    for (const parent of parents) {
+      opts.push({ value: parent.id, label: `${parent.icon} ${parent.name}`, group: parent.name })
+      const children = visibleCategories.filter((c) => c.parentId === parent.id)
+      for (const child of children) {
+        opts.push({ value: child.id, label: `  ${child.icon} ${child.name}`, group: parent.name })
+      }
+    }
+    return opts
+  }, [visibleCategories])
+
+  const accountOptions = useMemo(
+    () => accounts.map((a) => ({ value: a.id, label: a.name })),
+    [accounts]
+  )
 
   const toggleLedger = (id: string) => {
     setSelectedLedgerIds((prev) =>
@@ -213,9 +233,13 @@ export function TransactionForm({
           name="transactionTime"
           type="datetime-local"
           defaultValue={
-            transaction
-              ? new Date(transaction.transactionTime).toISOString().slice(0, 16)
-              : new Date().toISOString().slice(0, 16)
+            (() => {
+              const d = transaction
+                ? new Date(transaction.transactionTime)
+                : new Date()
+              const pad = (n: number) => String(n).padStart(2, '0')
+              return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+            })()
           }
           className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -236,30 +260,13 @@ export function TransactionForm({
             {classifying ? '🤖 分析中...' : '🤖 AI 分类'}
           </button>
         </div>
-        <select
-          name="categoryId"
+        <SearchableSelect
+          options={categoryOptions}
           value={selectedCategoryId}
-          onChange={(e) => setSelectedCategoryId(e.target.value)}
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-        >
-          <option value="">选择分类</option>
-          {visibleCategories
-            .filter((c) => !c.parentId)
-            .map((parent) => (
-              <optgroup key={parent.id} label={`${parent.icon} ${parent.name}`}>
-                <option value={parent.id}>
-                  {parent.icon} {parent.name}
-                </option>
-                {visibleCategories
-                  .filter((c) => c.parentId === parent.id)
-                  .map((child) => (
-                    <option key={child.id} value={child.id}>
-                      &nbsp;&nbsp;{child.icon} {child.name}
-                    </option>
-                  ))}
-              </optgroup>
-            ))}
-        </select>
+          onChange={setSelectedCategoryId}
+          placeholder="选择分类"
+        />
+        <input type="hidden" name="categoryId" value={selectedCategoryId} />
         {classifyResult && (
           <div className="mt-2 p-2 bg-purple-50 rounded-lg text-xs">
             <p className="text-purple-700">
@@ -282,19 +289,13 @@ export function TransactionForm({
         <label className="block text-sm font-medium text-zinc-700 mb-1">
           支付账户
         </label>
-        <select
-          name="accountId"
+        <SearchableSelect
+          options={accountOptions}
           value={selectedAccountId}
-          onChange={(e) => setSelectedAccountId(e.target.value)}
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-        >
-          <option value="">选择账户</option>
-          {accounts.map((acc) => (
-            <option key={acc.id} value={acc.id}>
-              {acc.name}
-            </option>
-          ))}
-        </select>
+          onChange={setSelectedAccountId}
+          placeholder="选择账户"
+        />
+        <input type="hidden" name="accountId" value={selectedAccountId} />
       </div>
 
       {/* 账本 */}

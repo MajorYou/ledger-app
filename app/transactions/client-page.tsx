@@ -10,6 +10,37 @@ export function ClientTransactionsPage({ data }: { data: PageData }) {
   const [showForm, setShowForm] = useState(false)
   const [editingTx, setEditingTx] = useState<any>(null)
 
+  // 批量选择
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setSelected(next)
+  }
+
+  const selectAll = () => {
+    if (selected.size === transactions.length) {
+      setSelected(new Set())
+    } else {
+      setSelected(new Set(transactions.map((tx: { id: string }) => tx.id)))
+    }
+  }
+
+  const handleBatchDelete = async () => {
+    if (selected.size === 0) return
+    setDeleting(true)
+    const ids = [...selected]
+    for (const id of ids) {
+      await deleteTransaction(id)
+    }
+    setDeleting(false)
+    setSelected(new Set())
+    setShowDeleteConfirm(false)
+  }
+
   const handleDelete = async (id: string) => {
     if (!confirm('确定删除这条交易记录？')) return
     await deleteTransaction(id)
@@ -43,12 +74,40 @@ export function ClientTransactionsPage({ data }: { data: PageData }) {
     <div className="max-w-4xl mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-bold text-zinc-900">交易记录</h1>
-        <button
-          onClick={handleAdd}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-        >
-          + 添加交易
-        </button>
+        <div className="flex gap-2">
+          {selected.size > 0 ? (
+            <>
+              <span className="text-sm text-zinc-500 self-center">已选 {selected.size} 笔</span>
+              <button
+                onClick={() => setSelected(new Set())}
+                className="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-700"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
+              >
+                删除选中
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={selectAll}
+                className="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-700"
+              >
+                全选
+              </button>
+              <button
+                onClick={handleAdd}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                + 添加交易
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 添加/编辑弹窗 */}
@@ -85,6 +144,35 @@ export function ClientTransactionsPage({ data }: { data: PageData }) {
         </div>
       )}
 
+      {/* 删除确认弹窗 */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-red-600 mb-2">⚠️ 确认批量删除</h3>
+            <p className="text-sm text-zinc-600 mb-1">
+              将删除 <span className="font-bold text-red-500">{selected.size} 笔</span> 交易记录
+            </p>
+            <p className="text-xs text-zinc-400 mb-6">此操作不可撤销，请谨慎操作。</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 border border-zinc-200 rounded-lg text-sm font-medium hover:bg-zinc-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                disabled={deleting}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? '删除中...' : `确认删除 ${selected.size} 笔`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 列表 */}
       {transactions.length === 0 ? (
         <div className="text-center py-16">
@@ -97,9 +185,17 @@ export function ClientTransactionsPage({ data }: { data: PageData }) {
           {transactions.map((tx: any) => (
             <div
               key={tx.id}
-              className="bg-white rounded-xl border border-zinc-200 p-4 hover:shadow-sm transition-shadow group"
+              className={`bg-white rounded-xl border p-4 hover:shadow-sm transition-shadow group ${
+                selected.has(tx.id) ? 'border-blue-400 ring-1 ring-blue-200' : 'border-zinc-200'
+              }`}
             >
               <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={selected.has(tx.id)}
+                  onChange={() => toggleSelect(tx.id)}
+                  className="mt-1.5 rounded shrink-0"
+                />
                 <span className="text-2xl mt-0.5">
                   {tx.category?.icon || '📦'}
                 </span>

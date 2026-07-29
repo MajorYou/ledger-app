@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import { parseBillText } from '@/lib/parsers/pdf-parser'
 import { logger } from '@/lib/logger'
+import { batchCheckDuplicates } from '@/lib/dedup'
 
 export async function POST(request: NextRequest) {
   const user = await getSession()
@@ -21,10 +22,21 @@ export async function POST(request: NextRequest) {
     const items = await parseBillText(text)
     logger.info('import:done', { count: items.length })
 
+    // 批量检查重复
+    const duplicateChecks = items.length > 0
+      ? await batchCheckDuplicates(items)
+      : []
+
+    const duplicateCount = duplicateChecks.filter(d => d.isDuplicate).length
+    if (duplicateCount > 0) {
+      logger.info('import:duplicates', { count: duplicateCount })
+    }
+
     return NextResponse.json({
       items, count: items.length,
+      duplicateChecks,
       message: items.length > 0
-        ? `解析成功：${items.length} 条记录`
+        ? `解析成功：${items.length} 条记录${duplicateCount > 0 ? `，检测到 ${duplicateCount} 笔疑似重复` : ''}`
         : `未识别到交易记录。文本已接收（${text.length} 字），但未匹配到交易格式。请确认是招行信用卡账单`
     })
   } catch (error) {

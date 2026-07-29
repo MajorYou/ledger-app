@@ -16,6 +16,8 @@ interface SearchableSelectProps {
   className?: string
   disabled?: boolean
   size?: 'sm' | 'md'
+  /** 前 N 个选项作为“最近使用”单独展示在顶部 */
+  recentCount?: number
 }
 
 export function SearchableSelect({
@@ -26,6 +28,7 @@ export function SearchableSelect({
   className = '',
   disabled = false,
   size = 'md',
+  recentCount = 0,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -83,10 +86,13 @@ export function SearchableSelect({
 
   const sizeClass = size === 'sm' ? 'py-1 text-xs' : 'py-2 text-sm'
 
-  // Group options
+  // Group options (split recent vs rest)
+  const recentOptions = recentCount > 0 ? filtered.slice(0, Math.min(recentCount, filtered.length)) : []
+  const restOptions = recentCount > 0 ? filtered.slice(Math.min(recentCount, filtered.length)) : filtered
+
   const grouped = new Map<string, Option[]>()
   const ungrouped: Option[] = []
-  for (const opt of filtered) {
+  for (const opt of restOptions) {
     if (opt.group) {
       if (!grouped.has(opt.group)) grouped.set(opt.group, [])
       grouped.get(opt.group)!.push(opt)
@@ -147,6 +153,26 @@ export function SearchableSelect({
               >
                 ✕ 清除选择
               </button>
+            )}
+
+            {/* 最近使用 */}
+            {recentOptions.length > 0 && (
+              <div>
+                <div className="px-3 py-1 text-xs text-blue-500 font-medium bg-blue-50/60">🕐 最近使用</div>
+                {recentOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => selectOption(opt.value)}
+                    className={`w-full text-left px-5 py-2 text-sm hover:bg-blue-50 transition-colors flex items-center gap-2 ${
+                      opt.value === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-zinc-700'
+                    }`}
+                  >
+                    <span className="flex-1 truncate">{opt.label}</span>
+                    {opt.group && <span className="text-[10px] text-zinc-400 shrink-0">{opt.group}</span>}
+                  </button>
+                ))}
+              </div>
             )}
 
             {/* 分组选项 */}

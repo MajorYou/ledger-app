@@ -101,8 +101,8 @@ function ruleBasedParse(rawText: string): ParsedBillItem[] {
     const isIncome = cat === '还款' || cat === '退款'
 
     items.push({
-      transactionDate: `2026-${transDate}`,
-      postDate: `2026-${postDate}`,
+      transactionDate: `2026-${transDate.replace('/', '-')}`,
+      postDate: `2026-${postDate.replace('/', '-')}`,
       description: desc.trim(),
       merchant,
       amount: Math.abs(amount),
@@ -118,8 +118,8 @@ function ruleBasedParse(rawText: string): ParsedBillItem[] {
     const [, date, desc, , , origAmount] = match
     const amount = parseFloat(origAmount.replace(/,/g, ''))
     items.push({
-      transactionDate: `2026-${date}`,
-      postDate: `2026-${date}`,
+      transactionDate: `2026-${date.replace('/', '-')}`,
+      postDate: `2026-${date.replace('/', '-')}`,
       description: desc,
       merchant: '信用卡还款',
       amount: Math.abs(amount),

@@ -4,6 +4,8 @@ import { prisma } from '@/lib/db'
 import { detectCategoryName } from '@/lib/category-detector'
 import { loadAgentSettings, findMatchingExpenses } from '@/lib/agent-settings'
 import { findDuplicates, DedupPair } from '@/lib/dedup'
+import { classifyTransaction } from '@/lib/ai/classifier'
+import { logger } from '@/lib/logger'
 
 async function autoLearnCategory(merchant: string, categoryId: string): Promise<boolean> {
   const count = await prisma.transaction.count({
@@ -78,20 +80,65 @@ export async function POST(request: NextRequest) {
     }
 
     if (!categoryId && type === 'expense' && merchant) {
-      const predictedName = detectCategoryName(merchant, description || '')
-      if (predictedName) {
-        const cat = await prisma.category.findFirst({
-          where: { name: predictedName, type: 'expense' },
+      // 优先级 1: ClassificationCache（最高优先级 — 用户学习到的正确分类）
+      // 先精确匹配
+      let cache = await prisma.classificationCache.findFirst({
+        where: { merchantPattern: merchant },
+      })
+      // 精确未命中时，用商户名前缀做模糊匹配
+      if (!cache && merchant && merchant.length >= 4) {
+        const prefix = merchant.substring(0, Math.min(6, merchant.length))
+        cache = await prisma.classificationCache.findFirst({
+          where: {
+            merchantPattern: { contains: prefix },
+            confidence: { gte: 0.8 },
+          },
+          orderBy: { confidence: 'desc' },
         })
-        if (cat) { categoryId = cat.id; categoryName = cat.name }
       }
-      if (!categoryId && predictedName) {
-        const parentCat = await prisma.category.findFirst({
-          where: { name: { contains: predictedName }, type: 'expense', children: { some: {} } },
+      if (cache && cache.confidence >= 0.8) {
+        const cat = await prisma.category.findUnique({ where: { id: cache.suggestedCategoryId } })
+        if (cat) {
+          categoryId = cat.id
+          categoryName = cat.name
+        }
+      }
+
+      // 优先级 2: 规则匹配（关键词匹配）
+      if (!categoryId) {
+        const predictedName = detectCategoryName(merchant, description || '')
+        if (predictedName) {
+          const cat = await prisma.category.findFirst({
+            where: { name: predictedName, type: 'expense' },
+          })
+          if (cat) { categoryId = cat.id; categoryName = cat.name }
+        }
+        if (!categoryId && predictedName) {
+          const parentCat = await prisma.category.findFirst({
+            where: { name: { contains: predictedName }, type: 'expense', children: { some: {} } },
+          })
+          if (parentCat) {
+            const child = await prisma.category.findFirst({ where: { parentId: parentCat.id } })
+            if (child) { categoryId = child.id; categoryName = `${parentCat.name} > ${child.name}` }
+          }
+        }
+      }
+
+      // 优先级 3: LLM fallback（最低优先级）
+      if (!categoryId && (agentSettings.classifyMode === 'llm' || agentSettings.classifyMode === 'hybrid')) {
+        const llmResult = await classifyTransaction({
+          merchant: merchant || '',
+          description: description || '',
+          amount: parseFloat(amount) || 0,
+          type: type || 'expense',
+          transactionTime: transactionDate,
         })
-        if (parentCat) {
-          const child = await prisma.category.findFirst({ where: { parentId: parentCat.id } })
-          if (child) { categoryId = child.id; categoryName = `${parentCat.name} > ${child.name}` }
+        if (llmResult?.categoryId) {
+          const cat = await prisma.category.findUnique({ where: { id: llmResult.categoryId } })
+          if (cat) {
+            categoryId = cat.id
+            categoryName = cat.name
+          }
         }
       }
     }
@@ -105,13 +152,24 @@ export async function POST(request: NextRequest) {
     }
 
     // 创建交易
+    let txTime: Date
+    if (transactionDate) {
+      if (transactionDate.includes('T')) {
+        txTime = new Date(transactionDate)
+      } else {
+        const [y, m, d] = transactionDate.slice(0, 10).split('-').map(Number)
+        txTime = new Date(y, m - 1, d)
+      }
+    } else {
+      txTime = new Date()
+    }
     await prisma.transaction.create({
       data: {
         type: type || 'expense',
         amount: parseFloat(amount) || 0,
         merchant: merchant || '',
         description: description || '',
-        transactionTime: transactionDate ? new Date(transactionDate) : new Date(),
+        transactionTime: txTime,
         categoryId,
         createdById: user.id,
         isConfirmed: !!categoryId,
@@ -128,6 +186,10 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, category: categoryName, learned, dedupWarnings: dupWarnings.length > 0 ? dupWarnings : undefined })
   } catch (error) {
+    logger.error('confirm:fatal', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
     return NextResponse.json(
       { error: `创建失败: ${error instanceof Error ? error.message : ''}` },
       { status: 500 }

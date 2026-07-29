@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { getSession } from '@/lib/auth'
 import { LogoutButton } from './logout-button'
+import { RefreshButton } from './refresh-button'
 
 export async function NavBar() {
   const user = await getSession()
@@ -67,6 +68,7 @@ export async function NavBar() {
         </div>
         {user && (
           <div className="flex items-center gap-3">
+            <RefreshButton />
             <span className="text-sm text-zinc-500">{user.name}</span>
             <LogoutButton />
           </div>

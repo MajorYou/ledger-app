@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
+import { useRefresh } from './refresh-provider'
 
 export function AiFab() {
   const pathname = usePathname()
@@ -58,6 +59,7 @@ function AiPanel({ onClose }: { onClose: () => void }) {
 }
 
 function AiChat() {
+  const { refresh } = useRefresh()
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string; preview?: unknown; isDelete?: boolean; deleteIds?: string[] }>>([
     { role: 'ai', content: '你好！我是记账助手，你可以直接跟我说：\n\n• "今天午饭麦当劳 35"\n• "昨晚打车 28"\n• "把上周餐饮挪到旅行账本"\n• "删除本月所有停车记录"\n\n我会帮你记账或整理账单 👇' },
@@ -135,6 +137,7 @@ function AiChat() {
       await executeAdjust(filters as any, operations as any)
       // 原地标记已确认，移除按钮
       setConfirmedIdx(msgIndex)
+      refresh()
     } catch {
       setMessages((prev) => [...prev, { role: 'ai', content: '⚠️ 执行失败' }])
     }

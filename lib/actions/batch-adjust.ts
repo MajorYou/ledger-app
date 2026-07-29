@@ -5,6 +5,7 @@ import { getSetting } from '@/lib/actions/settings'
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { logger } from '@/lib/logger'
+import { revalidatePath } from 'next/cache'
 
 interface NewTransaction {
   merchant: string
@@ -217,9 +218,12 @@ export async function dryRunAdjust(
   const where: Record<string, unknown> = {}
 
   if (filters.dateRange) {
+    // 安全构造本地时间：提取日期部分，避免 UTC 时区偏移
+    const [sy, sm, sd] = filters.dateRange.start.slice(0, 10).split('-').map(Number)
+    const [ey, em, ed] = filters.dateRange.end.slice(0, 10).split('-').map(Number)
     where.transactionTime = {
-      gte: new Date(filters.dateRange.start),
-      lte: new Date(filters.dateRange.end + 'T23:59:59'),
+      gte: new Date(sy, sm - 1, sd),
+      lte: new Date(ey, em - 1, ed, 23, 59, 59),
     }
   }
 
@@ -403,6 +407,10 @@ export async function executeAdjust(
     }
     count++
   }
+
+  revalidatePath('/')
+  revalidatePath('/transactions')
+  revalidatePath('/reports')
 
   return { count }
 }

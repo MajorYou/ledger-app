@@ -1,6 +1,7 @@
 'use client'
 
 import { createTransaction, updateTransaction } from '@/lib/actions/transactions'
+import { quickCreateCategory } from '@/lib/actions/categories'
 import { useActionState, useState, useEffect, useCallback, useMemo } from 'react'
 import { SearchableSelect } from '@/components/searchable-select'
 
@@ -40,6 +41,8 @@ interface ClassifyResult {
   confidence: number
   suggestNewCategory: boolean
   newCategoryName?: string
+  suggestedParentId?: string | null
+  suggestedParentName?: string
   reason: string
 }
 
@@ -74,7 +77,12 @@ export function TransactionForm({
   )
   const [classifyResult, setClassifyResult] = useState<ClassifyResult | null>(null)
   const [classifying, setClassifying] = useState(false)
+  const [classifyError, setClassifyError] = useState<string | null>(null)
   const [amountStr, setAmountStr] = useState(transaction?.amount?.toString() || '')
+  const [creatingCategory, setCreatingCategory] = useState(false)
+
+  // 本地分类列表，支持动态添加新创建的分类
+  const [localCategories, setLocalCategories] = useState<Category[]>(categories)
 
   useEffect(() => {
     if (state?.success) {
@@ -82,8 +90,8 @@ export function TransactionForm({
     }
   }, [state, onSuccess])
 
-  const expenseCategories = categories.filter((c) => c.type === 'expense')
-  const incomeCategories = categories.filter((c) => c.type === 'income')
+  const expenseCategories = localCategories.filter((c) => c.type === 'expense')
+  const incomeCategories = localCategories.filter((c) => c.type === 'income')
   const visibleCategories = type === 'expense' ? expenseCategories : incomeCategories
 
   // 构建可搜索下拉的选项
@@ -119,6 +127,7 @@ export function TransactionForm({
     if (!amountStr || parseFloat(amountStr) <= 0) return
 
     setClassifying(true)
+    setClassifyError(null)
     try {
       const res = await fetch('/api/classify', {
         method: 'POST',
@@ -132,18 +141,50 @@ export function TransactionForm({
         }),
       })
       const data = await res.json()
-      if (data && data.categoryId) {
+      if (data?.categoryId) {
         setClassifyResult(data)
         setSelectedCategoryId(data.categoryId)
-      } else if (data) {
-        setClassifyResult(data)
+        setClassifyError(null)
       }
     } catch (err) {
       console.error('Classify error:', err)
+      setClassifyError('分类失败，请重试')
     } finally {
       setClassifying(false)
     }
   }, [amountStr, type])
+
+  const handleCreateAndUseCategory = useCallback(async () => {
+    if (!classifyResult?.newCategoryName || !classifyResult?.suggestedParentId) return
+
+    setCreatingCategory(true)
+    try {
+      const result = await quickCreateCategory(
+        classifyResult.newCategoryName,
+        classifyResult.suggestedParentId,
+        type
+      )
+      if (result.success && result.category) {
+        // 添加新分类到本地列表
+        const newCat: Category = {
+          id: result.category.id,
+          name: result.category.name,
+          icon: result.category.icon,
+          type: result.category.type,
+          parentId: result.category.parentId,
+        }
+        setLocalCategories((prev) => [...prev, newCat])
+        // 自动选中
+        setSelectedCategoryId(result.category.id)
+        // 清除建议状态
+        setClassifyResult(null)
+      }
+    } catch (err) {
+      console.error('Create category error:', err)
+    } finally {
+      setCreatingCategory(false)
+    }
+  }, [classifyResult, type])
 
   return (
     <form action={formAction} className="space-y-4">
@@ -267,6 +308,9 @@ export function TransactionForm({
           placeholder="选择分类"
         />
         <input type="hidden" name="categoryId" value={selectedCategoryId} />
+        {classifyError && (
+          <p className="mt-1 text-xs text-red-500">{classifyError}</p>
+        )}
         {classifyResult && (
           <div className="mt-2 p-2 bg-purple-50 rounded-lg text-xs">
             <p className="text-purple-700">
@@ -276,9 +320,22 @@ export function TransactionForm({
               </span>
             </p>
             {classifyResult.suggestNewCategory && classifyResult.newCategoryName && (
-              <p className="text-purple-600 mt-1">
-                💡 建议新分类: "{classifyResult.newCategoryName}"
-              </p>
+              <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+                <p className="text-amber-800 font-medium">
+                  💡 AI 建议创建新分类：{classifyResult.newCategoryName}
+                  {classifyResult.suggestedParentName && (
+                    <span className="font-normal">（父分类：{classifyResult.suggestedParentName}）</span>
+                  )}
+                </p>
+                <button
+                  type="button"
+                  onClick={handleCreateAndUseCategory}
+                  disabled={creatingCategory || !classifyResult.suggestedParentId}
+                  className="mt-1.5 px-3 py-1 bg-amber-500 text-white rounded-md text-xs font-medium hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {creatingCategory ? '⏳ 创建中...' : '+ 创建并使用此分类'}
+                </button>
+              </div>
             )}
           </div>
         )}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { parseNaturalLanguage, dryRunAdjust, executeAdjust } from '@/lib/actions/batch-adjust'
 import type { DryRunResult } from '@/lib/actions/batch-adjust'
 
@@ -32,6 +33,7 @@ export function BatchAdjustClient({
   categories: CatItem[]
   ledgers: LedgerItem[]
 }) {
+  const router = useRouter()
   const [input, setInput] = useState('')
   const [parsing, setParsing] = useState(false)
   const [error, setError] = useState('')
@@ -75,6 +77,7 @@ export function BatchAdjustClient({
     setDryRun(null)
     setEditableTx([])
     setInput('')
+    router.refresh()
   }
 
   const updateTx = (idx: number, field: string, value: string) => {

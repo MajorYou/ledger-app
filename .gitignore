@@ -41,6 +41,9 @@ yarn-error.log*
 # ---- 测试产物 ----
 /coverage
 
+# ---- 过程产物（截图、临时文件等） ----
+/artifacts/
+
 # ---- 应用日志 ----
 /logs/
 

@@ -2,12 +2,14 @@ import OpenAI from 'openai'
 import { prisma } from '@/lib/db'
 import { getSetting } from '@/lib/actions/settings'
 
-interface ClassifyResult {
+export interface ClassifyResult {
   categoryId: string | null
   categoryName: string
   confidence: number
   suggestNewCategory: boolean
   newCategoryName?: string
+  suggestedParentId?: string | null
+  suggestedParentName?: string
   reason: string
 }
 
@@ -37,11 +39,193 @@ export async function classifyTransaction(
     transactionTime?: string
   }
 ): Promise<ClassifyResult | null> {
+  return classifyTransactionInner(transaction)
+}
+
+/**
+ * 批量分类交易：先逐条走缓存/规则，未命中的合并为一次 LLM 调用
+ */
+export async function batchClassifyTransactions(
+  transactions: Array<{
+    merchant: string
+    description: string
+    amount: number
+    type: string
+    transactionTime?: string
+  }>
+): Promise<Array<ClassifyResult | null>> {
+  const results: Array<ClassifyResult | null> = new Array(transactions.length)
+  const needLlm: Array<{ idx: number; tx: typeof transactions[0] }> = []
+
+  // 逐条查缓存
+  for (let i = 0; i < transactions.length; i++) {
+    const tx = transactions[i]
+    // 先精确匹配
+    let cache = await prisma.classificationCache.findFirst({
+      where: { merchantPattern: tx.merchant },
+    })
+    // 精确未命中时，用商户名前缀做模糊匹配
+    if (!cache && tx.merchant && tx.merchant.length >= 4) {
+      const prefix = tx.merchant.substring(0, Math.min(6, tx.merchant.length))
+      cache = await prisma.classificationCache.findFirst({
+        where: {
+          merchantPattern: { contains: prefix },
+          confidence: { gte: 0.8 },
+        },
+        orderBy: { confidence: 'desc' },
+      })
+    }
+    if (cache && cache.confidence >= 0.8) {
+      results[i] = {
+        categoryId: cache.suggestedCategoryId,
+        categoryName: '',
+        confidence: cache.confidence,
+        suggestNewCategory: false,
+        reason: `缓存命中 (${cache.hitCount} 次)`,
+      }
+    } else {
+      needLlm.push({ idx: i, tx })
+    }
+  }
+
+  if (needLlm.length === 0) return results
+
+  // 检查 API 是否配置
+  const client = await getAIClient()
+  if (!client) {
+    return results
+  }
+
+  // 获取分类树
+  const allTypes = [...new Set(needLlm.map(n => n.tx.type))]
+  const categories = await prisma.category.findMany({
+    where: { type: { in: allTypes } },
+    include: { parent: { select: { id: true, name: true } } },
+  })
+  const categoryTree = categories
+    .filter((c) => !c.parentId)
+    .map((parent) => {
+      const children = categories.filter((c) => c.parentId === parent.id)
+      return {
+        id: parent.id,
+        name: parent.name,
+        children: children.map((c) => ({ id: c.id, name: c.name })),
+      }
+    })
+
+  // 构建批量 prompt
+  const txList = needLlm.map((n, i) => {
+    const tx = n.tx
+    let timeHint = ''
+    if (tx.transactionTime) {
+      const date = new Date(tx.transactionTime)
+      const hour = date.getHours()
+      const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
+      const timeStr = date.toLocaleString('zh-CN')
+      if (hour >= 6 && hour < 10) timeHint = ` (早上,${weekday})`
+      else if (hour >= 11 && hour < 14) timeHint = ` (午餐,${weekday})`
+      else if (hour >= 17 && hour < 21) timeHint = ` (晚餐,${weekday})`
+      else if (hour >= 21 || hour < 6) timeHint = ` (夜间,${weekday})`
+      else timeHint = ` (${weekday})`
+    }
+    return `${i + 1}. [${tx.type === 'expense' ? '支出' : '收入'}] 商户:${tx.merchant || '未知'} 金额:¥${tx.amount}${timeHint}`
+  }).join('\n')
+
+  const prompt = `你是一个记账分类助手。请为以下每笔交易从已有分类树中选择最具体的子分类。
+
+已有分类树：
+${JSON.stringify(categoryTree, null, 2)}
+
+交易列表：
+${txList}
+
+请返回 JSON 数组（不要包含其他内容），每个元素对应一笔交易：
+[
+  {
+    "categoryId": "分类ID",
+    "confidence": 0.0-1.0,
+    "suggestNewCategory": false,
+    "reason": "分类理由"
+  }
+]`
+
   try {
-    // 1. 先查缓存
-    const cache = await prisma.classificationCache.findFirst({
+    const model = await getModelName()
+    const response = await client.chat.completions.create({
+      model,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      max_tokens: 1000,
+    })
+
+    const content = response.choices[0]?.message?.content || ''
+    const jsonMatch = content.match(/\[[\s\S]*\]/)
+    if (!jsonMatch) {
+      console.error('Failed to parse batch LLM response:', content)
+      return results
+    }
+
+    const llmResults = JSON.parse(jsonMatch[0]) as Array<Omit<ClassifyResult, 'categoryName'> & { categoryName?: string }>
+
+    for (let i = 0; i < needLlm.length; i++) {
+      const lr = llmResults[i]
+      if (!lr) continue
+      const fullResult: ClassifyResult = {
+        categoryId: lr.categoryId || null,
+        categoryName: lr.categoryName || '',
+        confidence: lr.confidence || 0,
+        suggestNewCategory: lr.suggestNewCategory || false,
+        newCategoryName: lr.newCategoryName,
+        reason: lr.reason || '',
+      }
+      results[needLlm[i].idx] = fullResult
+
+      // 更新缓存
+      if (fullResult.categoryId && fullResult.confidence >= 0.7) {
+        await prisma.classificationCache.upsert({
+          where: { merchantPattern: needLlm[i].tx.merchant || '__empty__' },
+          update: { hitCount: { increment: 1 }, confidence: fullResult.confidence },
+          create: {
+            merchantPattern: needLlm[i].tx.merchant || '__empty__',
+            suggestedCategoryId: fullResult.categoryId,
+            confidence: fullResult.confidence,
+            hitCount: 1,
+          },
+        })
+      }
+    }
+  } catch (error) {
+    console.error('Batch AI classification error:', error)
+  }
+
+  return results
+}
+
+async function classifyTransactionInner(
+  transaction: {
+    merchant: string
+    description: string
+    amount: number
+    type: string
+    transactionTime?: string
+  }
+): Promise<ClassifyResult | null> {
+  try {
+    // 1. 先查缓存（先精确匹配）
+    let cache = await prisma.classificationCache.findFirst({
       where: { merchantPattern: transaction.merchant },
     })
+    // 精确未命中时，用商户名前缀做模糊匹配
+    if (!cache && transaction.merchant && transaction.merchant.length >= 4) {
+      const prefix = transaction.merchant.substring(0, Math.min(6, transaction.merchant.length))
+      cache = await prisma.classificationCache.findFirst({
+        where: {
+          merchantPattern: { contains: prefix },
+          confidence: { gte: 0.8 },
+        },
+        orderBy: { confidence: 'desc' },
+      })
+    }
 
     if (cache && cache.confidence >= 0.8) {
       return {
@@ -140,6 +324,8 @@ ${JSON.stringify(categoryTree, null, 2)}
   "confidence": 0.0-1.0（置信度）,
   "suggestNewCategory": true/false（是否建议创建新分类）,
   "newCategoryName": "建议的新分类名称（仅当 suggestNewCategory 为 true 时）",
+  "suggestedParentId": "建议的父分类ID（从分类树中选择，仅当 suggestNewCategory 为 true 时）",
+  "suggestedParentName": "建议的父分类名称（仅当 suggestNewCategory 为 true 时）",
   "reason": "分类理由（一句话）"
 }`
 
@@ -158,7 +344,7 @@ ${JSON.stringify(categoryTree, null, 2)}
       return null
     }
 
-    const result = JSON.parse(jsonMatch[0]) as ClassifyResult
+    const result = JSON.parse(jsonMatch[0]) as ClassifyResult & { suggestedParentId?: string | null; suggestedParentName?: string }
 
     // 4. 更新缓存
     if (result.categoryId && result.confidence >= 0.7) {

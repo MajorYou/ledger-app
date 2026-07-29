@@ -2,30 +2,42 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { ReportsClient } from './client-page'
 
-async function getReportData(period: string) {
+function resolveDateRange(period: string, startDateStr?: string, endDateStr?: string) {
+  const now = new Date()
+  let startDate: Date
+  let endDate: Date
+
+  if (period === 'custom' && startDateStr && endDateStr) {
+    startDate = new Date(startDateStr + 'T00:00:00')
+    endDate = new Date(endDateStr + 'T23:59:59')
+  } else {
+    switch (period) {
+      case 'this-month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+        break
+      case 'last-month':
+        startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        break
+      case 'this-year':
+        startDate = new Date(now.getFullYear(), 0, 1)
+        break
+      default:
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+    }
+    endDate = period === 'last-month'
+      ? new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
+      : now
+  }
+
+  return { startDate, endDate }
+}
+
+async function getReportData(period: string, startDateStr?: string, endDateStr?: string) {
   const user = await getSession()
   if (!user) return null
 
+  const { startDate, endDate } = resolveDateRange(period, startDateStr, endDateStr)
   const now = new Date()
-  let startDate: Date
-
-  switch (period) {
-    case 'this-month':
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1)
-      break
-    case 'last-month':
-      startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      break
-    case 'this-year':
-      startDate = new Date(now.getFullYear(), 0, 1)
-      break
-    default:
-      startDate = new Date(now.getFullYear(), now.getMonth(), 1)
-  }
-
-  const endDate = period === 'last-month'
-    ? new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
-    : now
 
   // 按分类汇总
   const byCategory = await prisma.transaction.groupBy({
@@ -141,11 +153,15 @@ async function getReportData(period: string) {
     count: item._count,
   })).sort((a, b) => b.amount - a.amount)
 
+  // 交叉维度：按 (ledgerId, categoryId) 二维分组
+  const crossBreakdown = await getCrossBreakdown(startDate, endDate)
+
   return {
     categoryBreakdown: JSON.parse(JSON.stringify(categoryBreakdown)),
     ledgerBreakdown: JSON.parse(JSON.stringify(ledgerBreakdown)),
     monthTrend: JSON.parse(JSON.stringify(monthTrend)),
     accountBreakdown: JSON.parse(JSON.stringify(accountBreakdown)),
+    crossBreakdown: JSON.parse(JSON.stringify(crossBreakdown)),
     totalExpense: categoryBreakdown
       .filter((c) => c.type === 'expense')
       .reduce((s, c) => s + c.amount, 0),
@@ -155,15 +171,111 @@ async function getReportData(period: string) {
   }
 }
 
+async function getCrossBreakdown(startDate: Date, endDate: Date) {
+  // 获取时间范围内的所有 TransactionLedger 关联，带上交易的 categoryId、type、amount
+  const txLedgers = await prisma.transactionLedger.findMany({
+    where: {
+      transaction: {
+        transactionTime: { gte: startDate, lte: endDate },
+        categoryId: { not: null },
+      },
+    },
+    select: {
+      ledgerId: true,
+      transaction: {
+        select: {
+          categoryId: true,
+          type: true,
+          amount: true,
+        },
+      },
+    },
+  })
+
+  // 收集涉及的 ledgerId 和 categoryId
+  const ledgerIdSet = new Set<string>()
+  const categoryIdSet = new Set<string>()
+  // 按 (ledgerId, categoryId) 分组，分别累计 expense 和 income
+  const crossMap = new Map<string, { expense: number; income: number }>()
+
+  for (const tl of txLedgers) {
+    const { ledgerId } = tl
+    const { categoryId, type, amount } = tl.transaction
+    if (!categoryId) continue
+    ledgerIdSet.add(ledgerId)
+    categoryIdSet.add(categoryId)
+    const key = `${ledgerId}::${categoryId}`
+    const entry = crossMap.get(key) || { expense: 0, income: 0 }
+    if (type === 'expense') entry.expense += amount
+    else if (type === 'income') entry.income += amount
+    crossMap.set(key, entry)
+  }
+
+  // 批量查询账本和分类信息
+  const [ledgers, categories] = await Promise.all([
+    prisma.ledger.findMany({
+      where: { id: { in: [...ledgerIdSet] } },
+      select: { id: true, name: true, color: true },
+    }),
+    prisma.category.findMany({
+      where: { id: { in: [...categoryIdSet] } },
+      select: { id: true, name: true, icon: true, color: true },
+    }),
+  ])
+
+  const ledgerInfoMap = new Map(ledgers.map((l) => [l.id, l]))
+  const categoryInfoMap = new Map(categories.map((c) => [c.id, c]))
+
+  // 构建矩阵数据
+  const matrix: Array<{
+    ledgerId: string
+    ledgerName: string
+    ledgerColor: string
+    categoryId: string
+    categoryName: string
+    categoryIcon: string
+    categoryColor: string
+    expense: number
+    income: number
+  }> = []
+
+  for (const [key, val] of crossMap.entries()) {
+    const [ledgerId, categoryId] = key.split('::')
+    const ledger = ledgerInfoMap.get(ledgerId)
+    const category = categoryInfoMap.get(categoryId)
+    matrix.push({
+      ledgerId,
+      ledgerName: ledger?.name || '未知',
+      ledgerColor: ledger?.color || '#6b7280',
+      categoryId,
+      categoryName: category?.name || '未知',
+      categoryIcon: category?.icon || '📦',
+      categoryColor: category?.color || '#6b7280',
+      expense: val.expense,
+      income: val.income,
+    })
+  }
+
+  return matrix
+}
+
 export type ReportData = NonNullable<Awaited<ReturnType<typeof getReportData>>>
 
 export default async function ReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ period?: string }>
+  searchParams: Promise<{ period?: string; startDate?: string; endDate?: string }>
 }) {
-  const { period } = await searchParams
-  const data = await getReportData(period || 'this-month')
+  const { period, startDate, endDate } = await searchParams
+  const currentPeriod = period || 'this-month'
+  const data = await getReportData(currentPeriod, startDate, endDate)
   if (!data) return null
-  return <ReportsClient data={data} currentPeriod={period || 'this-month'} />
+  return (
+    <ReportsClient
+      data={data}
+      currentPeriod={currentPeriod}
+      startDate={startDate}
+      endDate={endDate}
+    />
+  )
 }

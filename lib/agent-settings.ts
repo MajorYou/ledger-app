@@ -1,4 +1,5 @@
 import { getSetting } from '@/lib/actions/settings'
+import { safeParseDate } from '@/lib/date-utils'
 
 export interface AgentSettings {
   refundMode: 'add_income' | 'match_deduct' | 'always_ask'
@@ -39,14 +40,19 @@ export async function findMatchingExpenses(
   // 动态导入避免循环依赖
   const { prisma } = await import('@/lib/db')
 
-  const startDate = new Date(date)
+  const parsedDate = safeParseDate(date)
+  const startDate = new Date(parsedDate)
   startDate.setDate(startDate.getDate() - 30) // 往前30天
+
+  // 构造当天结束时间（23:59:59）作为查询上界
+  const endDate = new Date(parsedDate)
+  endDate.setHours(23, 59, 59, 999)
 
   // 找同商户、金额相近(±30%)的支出记录
   const transactions = await prisma.transaction.findMany({
     where: {
       type: 'expense',
-      transactionTime: { gte: startDate, lte: new Date(date + 'T23:59:59') },
+      transactionTime: { gte: startDate, lte: endDate },
       // 相同金额或金额相近
       amount: {
         gte: amount * 0.7,

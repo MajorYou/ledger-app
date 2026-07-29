@@ -9,11 +9,16 @@ export async function GET(_request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const [ledgers, rawCategories] = await Promise.all([
+  const [ledgers, rawCategories, accounts] = await Promise.all([
     prisma.ledger.findMany({ select: { id: true, name: true }, orderBy: { name: 'asc' } }),
     prisma.category.findMany({
       select: { id: true, name: true, icon: true, type: true, parent: { select: { name: true } } },
       orderBy: [{ type: 'asc' }, { name: 'asc' }],
+    }),
+    prisma.account.findMany({
+      where: { userId: user.id, isActive: true },
+      select: { id: true, name: true, type: true },
+      orderBy: { name: 'asc' },
     }),
   ])
 
@@ -29,6 +34,7 @@ export async function GET(_request: NextRequest) {
       type: c.type,
       parentName: c.parent?.name || undefined,
     })),
+    accounts,
     recentCount,
   })
 }

@@ -1,5 +1,7 @@
-// 去重引擎：三维度匹配评分
+// 去重引擎：多维度匹配评分
 import { getSetting, saveSetting } from '@/lib/actions/settings'
+import { prisma } from '@/lib/db'
+import { safeParseDate } from '@/lib/date-utils'
 
 // ---- 归并建议相关类型 ----
 
@@ -43,7 +45,11 @@ export interface DedupCandidate {
   type: string
   transactionTime: string
   categoryName: string | null
+  channel?: string | null
+  sourceAccountName?: string | null
 }
+
+export type DuplicateType = 'exact' | 'cross_platform' | 'fuzzy'
 
 export interface ReasonDetail {
   dimension: 'merchant' | 'amount' | 'time'
@@ -58,6 +64,7 @@ export interface DedupPair {
   reasons: string[]
   reasonDetails: ReasonDetail[]
   isRefund: boolean
+  duplicateType: DuplicateType
 }
 
 /**
@@ -83,17 +90,17 @@ export function textSimilarity(a: string, b: string): number {
  * ≥ 0.6 视为疑似重复
  */
 export function dedupScore(
-  a: { merchant: string; amount: number; transactionTime: string },
-  b: { merchant: string; amount: number; transactionTime: string },
+  a: { merchant: string; amount: number; transactionTime: string; channel?: string | null },
+  b: { merchant: string; amount: number; transactionTime: string; channel?: string | null },
 ): { score: number; reasons: string[]; reasonDetails: ReasonDetail[] } {
   const reasons: string[] = []
   const reasonDetails: ReasonDetail[] = []
   let score = 0
 
   // 时间差 ≤ 5min → +0.4, ≤ 30min → +0.2
-  const timeDiff = Math.abs(
-    new Date(a.transactionTime).getTime() - new Date(b.transactionTime).getTime()
-  ) / 60000
+  const timeA = safeParseDate(a.transactionTime).getTime()
+  const timeB = safeParseDate(b.transactionTime).getTime()
+  const timeDiff = Math.abs(timeA - timeB) / 60000
   if (timeDiff <= 5) {
     score += 0.4
     reasons.push(`时间接近 (${Math.round(timeDiff)}分钟)`)
@@ -130,6 +137,17 @@ export function dedupScore(
     }
   }
 
+  // channel 维度加分：跨通道强烈暗示同一笔交易，同通道轻微加分
+  if (a.channel && b.channel) {
+    if (a.channel !== b.channel) {
+      score += 0.15
+      reasons.push(`跨通道 (${a.channel} vs ${b.channel})`)
+    } else {
+      score += 0.05
+      reasons.push(`同通道 (${a.channel})`)
+    }
+  }
+
   return { score: Math.min(score, 1), reasons, reasonDetails }
 }
 
@@ -141,9 +159,8 @@ export async function findDuplicates(
   amount: number,
   transactionTime: string,
 ): Promise<DedupPair[]> {
-  const { prisma } = await import('@/lib/db')
-
-  const time = new Date(transactionTime)
+  const time = safeParseDate(transactionTime)
+  if (isNaN(time.getTime())) return []
   const startTime = new Date(time.getTime() - 60 * 60000) // 前60分钟
   const endTime = new Date(time.getTime() + 60 * 60000)   // 后60分钟
 
@@ -156,12 +173,12 @@ export async function findDuplicates(
         lte: amount * 1.15,
       },
     },
-    include: { category: { select: { name: true } } },
+    include: { category: { select: { name: true } }, sourceAccount: { select: { id: true, name: true } } },
     orderBy: { transactionTime: 'desc' },
     take: 50,
   })
 
-  const input = { merchant, amount, transactionTime }
+  const input = { merchant, amount, transactionTime: time.toISOString() }
   const pairs: DedupPair[] = []
 
   for (const c of candidates) {
@@ -169,6 +186,7 @@ export async function findDuplicates(
       merchant: c.merchant,
       amount: c.amount,
       transactionTime: c.transactionTime.toISOString(),
+      channel: c.channel,
     })
     if (score >= 0.6) {
       pairs.push({
@@ -179,6 +197,8 @@ export async function findDuplicates(
           type: c.type,
           transactionTime: localTime(c.transactionTime),
           categoryName: c.category?.name || null,
+          channel: c.channel,
+          sourceAccountName: c.sourceAccount?.name || null,
         },
         b: {
           id: '',
@@ -187,11 +207,14 @@ export async function findDuplicates(
           type: '',
           transactionTime,
           categoryName: null,
+          channel: null,
+          sourceAccountName: null,
         },
         score,
         reasons,
         reasonDetails,
         isRefund: false,
+        duplicateType: 'fuzzy',
       })
     }
   }
@@ -222,16 +245,14 @@ export async function skipDedupPair(idA: string, idB: string): Promise<void> {
 
 /** 全局扫描：找所有疑似重复对 */
 export async function scanAllDuplicates(): Promise<DedupPair[]> {
-  const { prisma } = await import('@/lib/db')
+  // 按 30 分钟窗口分组所有交易
+  const transactions = await prisma.transaction.findMany({
+    include: { category: { select: { name: true } }, sourceAccount: { select: { id: true, name: true } } },
+    orderBy: { transactionTime: 'asc' },
+  })
 
   // 获取已忽略的交易对
   const ignored = await getIgnoredPairs()
-
-  // 按 30 分钟窗口分组所有交易
-  const transactions = await prisma.transaction.findMany({
-    include: { category: { select: { name: true } } },
-    orderBy: { transactionTime: 'asc' },
-  })
 
   const pairs: DedupPair[] = []
 
@@ -249,34 +270,77 @@ export async function scanAllDuplicates(): Promise<DedupPair[]> {
       const [first, second] = [a.id, b.id].sort()
       if (ignored.has(`${first}:${second}`)) continue
 
+      // 精确匹配：externalOrderId 相同且非空
+      if (a.externalOrderId && b.externalOrderId && a.externalOrderId === b.externalOrderId) {
+        pairs.push({
+          a: {
+            id: a.id, merchant: a.merchant, amount: a.amount, type: a.type,
+            transactionTime: localTime(a.transactionTime), categoryName: a.category?.name || null,
+            channel: a.channel, sourceAccountName: a.sourceAccount?.name || null,
+          },
+          b: {
+            id: b.id, merchant: b.merchant, amount: b.amount, type: b.type,
+            transactionTime: localTime(b.transactionTime), categoryName: b.category?.name || null,
+            channel: b.channel, sourceAccountName: b.sourceAccount?.name || null,
+          },
+          score: 1.0, reasons: ['精确匹配（订单号相同）'], reasonDetails: [],
+          isRefund: false, duplicateType: 'exact',
+        })
+        continue
+      }
+
+      // 卡号匹配：相同 sourceAccountId + 相同金额 + 时间接近 → 高置信度重复
+      if (
+        a.sourceAccountId && b.sourceAccountId &&
+        a.sourceAccountId === b.sourceAccountId &&
+        a.amount === b.amount &&
+        timeDiff <= 5
+      ) {
+        const [first2, second2] = [a.id, b.id].sort()
+        if (!ignored.has(`${first2}:${second2}`)) {
+          pairs.push({
+            a: {
+              id: a.id, merchant: a.merchant, amount: a.amount, type: a.type,
+              transactionTime: localTime(a.transactionTime), categoryName: a.category?.name || null,
+              channel: a.channel, sourceAccountName: a.sourceAccount?.name || null,
+            },
+            b: {
+              id: b.id, merchant: b.merchant, amount: b.amount, type: b.type,
+              transactionTime: localTime(b.transactionTime), categoryName: b.category?.name || null,
+              channel: b.channel, sourceAccountName: b.sourceAccount?.name || null,
+            },
+            score: 0.95, reasons: ['同账户同金额时间接近（卡号匹配）'], reasonDetails: [],
+            isRefund: false, duplicateType: 'exact',
+          })
+          continue
+        }
+      }
+
       const { score, reasons, reasonDetails } = dedupScore(
-        { merchant: a.merchant, amount: a.amount, transactionTime: a.transactionTime.toISOString() },
-        { merchant: b.merchant, amount: b.amount, transactionTime: b.transactionTime.toISOString() },
+        { merchant: a.merchant, amount: a.amount, transactionTime: a.transactionTime.toISOString(), channel: a.channel },
+        { merchant: b.merchant, amount: b.amount, transactionTime: b.transactionTime.toISOString(), channel: b.channel },
       )
       if (score >= 0.6) {
+        // 判断重复类型
+        let duplicateType: DuplicateType = 'fuzzy'
+        if (a.channel && b.channel && a.channel !== b.channel) {
+          duplicateType = 'cross_platform'
+        }
+
         // 检测退款场景：一正一负
         const isRefund = (a.type === 'income') !== (b.type === 'income')
         pairs.push({
           a: {
-            id: a.id,
-            merchant: a.merchant,
-            amount: a.amount,
-            type: a.type,
-            transactionTime: localTime(a.transactionTime),
-            categoryName: a.category?.name || null,
+            id: a.id, merchant: a.merchant, amount: a.amount, type: a.type,
+            transactionTime: localTime(a.transactionTime), categoryName: a.category?.name || null,
+            channel: a.channel, sourceAccountName: a.sourceAccount?.name || null,
           },
           b: {
-            id: b.id,
-            merchant: b.merchant,
-            amount: b.amount,
-            type: b.type,
-            transactionTime: localTime(b.transactionTime),
-            categoryName: b.category?.name || null,
+            id: b.id, merchant: b.merchant, amount: b.amount, type: b.type,
+            transactionTime: localTime(b.transactionTime), categoryName: b.category?.name || null,
+            channel: b.channel, sourceAccountName: b.sourceAccount?.name || null,
           },
-          score,
-          reasons,
-          reasonDetails,
-          isRefund,
+          score, reasons, reasonDetails, isRefund, duplicateType,
         })
       }
     }
@@ -286,13 +350,9 @@ export async function scanAllDuplicates(): Promise<DedupPair[]> {
 }
 
 /**
- * 处理去重：保留 keepId，删除 deleteId
- */
-/**
  * 扫描归并建议：识别周期性/相似的同类支出
  */
 export async function scanMergeSuggestions(): Promise<MergeGroup[]> {
-  const { prisma } = await import('@/lib/db')
 
   // 获取所有交易（含分类信息）
   const transactions = await prisma.transaction.findMany({
@@ -430,7 +490,6 @@ export async function batchUpdateCategory(
   transactionIds: string[],
   categoryId: string
 ): Promise<{ success: boolean; count: number }> {
-  const { prisma } = await import('@/lib/db')
   await prisma.transaction.updateMany({
     where: { id: { in: transactionIds } },
     data: { categoryId },
@@ -444,7 +503,6 @@ export async function batchUpdateCategory(
 export async function batchMarkAsFixed(
   transactionIds: string[]
 ): Promise<{ success: boolean; count: number }> {
-  const { prisma } = await import('@/lib/db')
   const txs = await prisma.transaction.findMany({
     where: { id: { in: transactionIds } },
     select: { id: true, description: true },
@@ -468,6 +526,7 @@ export interface ImportDuplicateCheck {
   isDuplicate: boolean
   duplicateScore: number
   duplicateReasons: string[]
+  duplicateType: DuplicateType
 }
 
 /**
@@ -475,15 +534,13 @@ export interface ImportDuplicateCheck {
  * 返回每笔交易的重复标记信息
  */
 export async function batchCheckDuplicates(
-  items: Array<{ merchant: string; amount: number; transactionDate: string }>
+  items: Array<{ merchant: string; amount: number; transactionDate: string; channel?: string; externalOrderId?: string }>
 ): Promise<ImportDuplicateCheck[]> {
-  const { prisma } = await import('@/lib/db')
-
   // 收集所有时间窗口，批量查询候选交易
-  const allCandidates = new Map<string, { merchant: string; amount: number; transactionTime: Date }>()
+  const allCandidates = new Map<string, { merchant: string; amount: number; transactionTime: Date; channel: string | null }>()
 
   for (const item of items) {
-    const time = new Date(item.transactionDate + 'T12:00:00')
+    const time = safeParseDate(item.transactionDate)
     const startTime = new Date(time.getTime() - 1440 * 60000)  // 前24小时
     const endTime = new Date(time.getTime() + 1440 * 60000)    // 后24小时
 
@@ -495,7 +552,7 @@ export async function batchCheckDuplicates(
           lte: item.amount * 1.15,
         },
       },
-      select: { id: true, merchant: true, amount: true, transactionTime: true },
+      select: { id: true, merchant: true, amount: true, transactionTime: true, channel: true },
       take: 20,
     })
 
@@ -504,6 +561,7 @@ export async function batchCheckDuplicates(
         merchant: c.merchant,
         amount: c.amount,
         transactionTime: c.transactionTime,
+        channel: c.channel,
       })
     }
   }
@@ -512,21 +570,43 @@ export async function batchCheckDuplicates(
   const results: ImportDuplicateCheck[] = []
 
   for (const item of items) {
-    const time = new Date(item.transactionDate + 'T12:00:00')
-    const input = { merchant: item.merchant, amount: item.amount, transactionTime: time.toISOString() }
+    // 先尝试 externalOrderId 精确匹配
+    if (item.externalOrderId) {
+      const exactMatches = await prisma.transaction.findMany({
+        where: { externalOrderId: item.externalOrderId },
+        select: { id: true },
+        take: 1,
+      })
+      if (exactMatches.length > 0) {
+        results.push({
+          isDuplicate: true,
+          duplicateScore: 1.0,
+          duplicateReasons: ['精确匹配（订单号相同）'],
+          duplicateType: 'exact',
+        })
+        continue
+      }
+    }
+
+    const time = safeParseDate(item.transactionDate)
+    const input = { merchant: item.merchant, amount: item.amount, transactionTime: time.toISOString(), channel: item.channel || null }
 
     let bestScore = 0
     let bestReasons: string[] = []
+    let bestType: DuplicateType = 'fuzzy'
 
     for (const [, c] of allCandidates) {
       const { score, reasons } = dedupScore(input, {
         merchant: c.merchant,
         amount: c.amount,
         transactionTime: c.transactionTime.toISOString(),
+        channel: c.channel,
       })
       if (score > bestScore) {
         bestScore = score
         bestReasons = reasons
+        // 判断是否为跨平台
+        bestType = (item.channel && c.channel && item.channel !== c.channel) ? 'cross_platform' : 'fuzzy'
       }
     }
 
@@ -534,15 +614,78 @@ export async function batchCheckDuplicates(
       isDuplicate: bestScore >= 0.6,
       duplicateScore: bestScore,
       duplicateReasons: bestReasons,
+      duplicateType: bestType,
     })
   }
 
   return results
 }
 
+// ---- 精确去重 & 卡号去重 ----
+
+/** 按 externalOrderId 精确匹配 */
+export async function findDuplicatesByOrderId(
+  userId: string,
+  externalOrderId: string
+): Promise<any[]> {
+  if (!externalOrderId) return []
+  return prisma.transaction.findMany({
+    where: {
+      createdById: userId,
+      externalOrderId: externalOrderId,
+    },
+    include: {
+      sourceAccount: { select: { id: true, name: true } },
+    },
+  })
+}
+
+/** 按 sourceAccountId + amount + 时间窗口匹配 */
+export async function findDuplicatesByCard(
+  userId: string,
+  sourceAccountId: string | null,
+  amount: number,
+  transactionTime: Date,
+  windowMinutes: number = 5
+): Promise<any[]> {
+  if (!sourceAccountId) return []
+  const startTime = new Date(transactionTime.getTime() - windowMinutes * 60 * 1000)
+  const endTime = new Date(transactionTime.getTime() + windowMinutes * 60 * 1000)
+  return prisma.transaction.findMany({
+    where: {
+      createdById: userId,
+      sourceAccountId,
+      amount,
+      transactionTime: { gte: startTime, lte: endTime },
+    },
+    include: {
+      sourceAccount: { select: { id: true, name: true } },
+    },
+  })
+}
+
+/** 余额回滚辅助函数：删除交易前还原账户余额 */
+async function rollbackTransactionBalance(tx: any, transaction: any): Promise<void> {
+  if (!transaction) return
+  const { type, amount, sourceAccountId, toAccountId } = transaction
+  if (type === 'expense' && sourceAccountId) {
+    await tx.account.update({ where: { id: sourceAccountId }, data: { balance: { increment: amount } } })
+  } else if (type === 'income' && toAccountId) {
+    await tx.account.update({ where: { id: toAccountId }, data: { balance: { increment: -amount } } })
+  } else if (type === 'transfer') {
+    if (sourceAccountId) await tx.account.update({ where: { id: sourceAccountId }, data: { balance: { increment: amount } } })
+    if (toAccountId) await tx.account.update({ where: { id: toAccountId }, data: { balance: { increment: -amount } } })
+  }
+}
+
 export async function resolveDedup(keepId: string, deleteId: string): Promise<void> {
-  const { prisma } = await import('@/lib/db')
-  await prisma.transaction.delete({ where: { id: deleteId } })
+  await prisma.$transaction(async (tx) => {
+    const deleteTx = await tx.transaction.findUnique({ where: { id: deleteId } })
+    if (deleteTx) {
+      await rollbackTransactionBalance(tx, deleteTx)
+    }
+    await tx.transaction.delete({ where: { id: deleteId } })
+  })
 }
 
 /**
@@ -550,25 +693,29 @@ export async function resolveDedup(keepId: string, deleteId: string): Promise<vo
  * 保留 keepId 的交易，金额修改为两者之和（正负抵消），删除 deleteId
  */
 export async function mergeWithOffset(keepId: string, deleteId: string): Promise<{ newAmount: number }> {
-  const { prisma } = await import('@/lib/db')
-  const keepTx = await prisma.transaction.findUnique({ where: { id: keepId } })
-  const deleteTx = await prisma.transaction.findUnique({ where: { id: deleteId } })
-  if (!keepTx || !deleteTx) throw new Error('交易不存在')
+  return prisma.$transaction(async (tx) => {
+    const keepTx = await tx.transaction.findUnique({ where: { id: keepId } })
+    const deleteTx = await tx.transaction.findUnique({ where: { id: deleteId } })
+    if (!keepTx || !deleteTx) throw new Error('交易不存在')
 
-  // 计算净额：支出为负，收入为正
-  const keepSigned = keepTx.type === 'income' ? keepTx.amount : -keepTx.amount
-  const deleteSigned = deleteTx.type === 'income' ? deleteTx.amount : -deleteTx.amount
-  const netAmount = keepSigned + deleteSigned
+    // 先回滚被删除交易的余额影响
+    await rollbackTransactionBalance(tx, deleteTx)
 
-  // 修改保留交易的金额和类型
-  const newType = netAmount >= 0 ? 'income' : 'expense'
-  await prisma.transaction.update({
-    where: { id: keepId },
-    data: { amount: Math.abs(netAmount), type: newType },
+    // 计算净额：支出为负，收入为正
+    const keepSigned = keepTx.type === 'income' ? keepTx.amount : -keepTx.amount
+    const deleteSigned = deleteTx.type === 'income' ? deleteTx.amount : -deleteTx.amount
+    const netAmount = keepSigned + deleteSigned
+
+    // 修改保留交易的金额和类型
+    const newType = netAmount >= 0 ? 'income' : 'expense'
+    await tx.transaction.update({
+      where: { id: keepId },
+      data: { amount: Math.abs(netAmount), type: newType },
+    })
+
+    // 删除另一笔
+    await tx.transaction.delete({ where: { id: deleteId } })
+
+    return { newAmount: Math.abs(netAmount) }
   })
-
-  // 删除另一笔
-  await prisma.transaction.delete({ where: { id: deleteId } })
-
-  return { newAmount: Math.abs(netAmount) }
 }

@@ -7,7 +7,7 @@ import type { ReportData } from './page'
 interface CatItem { name: string; icon: string; color: string; type: string; amount: number; count: number }
 interface LedgerItem { name: string; color: string; amount: number; count: number }
 interface MonthItem { month: string; expense: number; income: number }
-interface AccountItem { name: string; amount: number; count: number }
+interface AccountItem { name: string; type?: string; expense: number; income: number; amount: number; count: number }
 interface CrossItem {
   ledgerId: string; ledgerName: string; ledgerColor: string
   categoryId: string; categoryName: string; categoryIcon: string; categoryColor: string
@@ -487,16 +487,27 @@ export function ReportsClient({
               {data.accountBreakdown.length === 0 ? (
                 <p className="text-sm text-zinc-400 py-4">暂无数据</p>
               ) : (
-                <BarChart
-                  data={data.accountBreakdown.map((a: AccountItem) => ({
-                    name: a.name,
-                    value: a.amount,
-                    color: '#6366f1',
-                  }))}
-                  maxValue={
-                    Math.max(...data.accountBreakdown.map((a: AccountItem) => a.amount), 1)
-                  }
-                />
+                <div className="space-y-3">
+                  {data.accountBreakdown.map((a: AccountItem, i: number) => (
+                    <div key={i} className="text-sm">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-zinc-700 font-medium">{a.name}</span>
+                        <div className="flex gap-3 text-xs">
+                          {a.expense > 0 && <span className="text-red-500">支出 ¥{a.expense.toFixed(2)}</span>}
+                          {a.income > 0 && <span className="text-green-500">收入 ¥{a.income.toFixed(2)}</span>}
+                        </div>
+                      </div>
+                      <div className="flex gap-1 h-3 bg-zinc-100 rounded-full overflow-hidden">
+                        {a.expense > 0 && (
+                          <div className="h-full bg-red-400 rounded-l-full" style={{ width: `${(a.expense / a.amount) * 100}%` }} />
+                        )}
+                        {a.income > 0 && (
+                          <div className="h-full bg-green-400 rounded-r-full" style={{ width: `${(a.income / a.amount) * 100}%` }} />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           </div>

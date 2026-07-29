@@ -3,17 +3,9 @@
 import { getSetting } from '@/lib/actions/settings'
 import OpenAI from 'openai'
 import { logger } from '@/lib/logger'
+import type { ParsedBillItem } from './types'
 
-export interface ParsedBillItem {
-  transactionDate: string
-  postDate: string
-  description: string
-  merchant: string
-  amount: number
-  type: 'expense' | 'income'
-  category: '还款' | '分期' | '退款' | '消费'
-  currency: string
-}
+export type { ParsedBillItem } from './types'
 
 export async function parseBillText(rawText: string): Promise<ParsedBillItem[]> {
   const apiKey = await getSetting('DEEPSEEK_API_KEY')
@@ -84,10 +76,10 @@ function ruleBasedParse(rawText: string): ParsedBillItem[] {
     if (desc.trim().includes('Transaction Details')) continue
 
     const matchPos = match.index!
-    let cat: ParsedBillItem['category'] = '消费'
+    let cat: string = '消费'
     for (let i = sectionMatches.length - 1; i >= 0; i--) {
-      if (sectionMatches[i].index < matchPos) {
-        cat = sectionMatches[i][1] as ParsedBillItem['category']
+      if (sectionMatches[i].index! < matchPos) {
+        cat = sectionMatches[i][1]
         break
       }
     }

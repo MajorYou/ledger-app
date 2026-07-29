@@ -130,28 +130,68 @@ async function getReportData(period: string, startDateStr?: string, endDateStr?:
     })
   }
 
-  // 按账户汇总
-  const byAccount = await prisma.transaction.groupBy({
-    by: ['accountId'],
-    where: {
-      accountId: { not: null },
-      transactionTime: { gte: startDate, lte: endDate },
-    },
-    _sum: { amount: true },
-    _count: true,
-  })
+  // 按账户汇总（支出视角 + 收入视角）
+  const [expenseByAccount, incomeByAccount] = await Promise.all([
+    // 支出视角：按 sourceAccountId 分组
+    prisma.transaction.groupBy({
+      by: ['sourceAccountId'],
+      where: {
+        sourceAccountId: { not: null },
+        type: 'expense',
+        transactionTime: { gte: startDate, lte: endDate },
+      },
+      _sum: { amount: true },
+      _count: true,
+    }),
+    // 收入视角：按 toAccountId 分组
+    prisma.transaction.groupBy({
+      by: ['toAccountId'],
+      where: {
+        toAccountId: { not: null },
+        type: 'income',
+        transactionTime: { gte: startDate, lte: endDate },
+      },
+      _sum: { amount: true },
+      _count: true,
+    }),
+  ])
 
+  // 合并两个结果
+  const accountMap = new Map<string, { expense: number; income: number; expenseCount: number; incomeCount: number }>()
+  for (const item of expenseByAccount) {
+    const id = item.sourceAccountId!
+    const entry = accountMap.get(id) || { expense: 0, income: 0, expenseCount: 0, incomeCount: 0 }
+    entry.expense = item._sum.amount || 0
+    entry.expenseCount = item._count
+    accountMap.set(id, entry)
+  }
+  for (const item of incomeByAccount) {
+    const id = item.toAccountId!
+    const entry = accountMap.get(id) || { expense: 0, income: 0, expenseCount: 0, incomeCount: 0 }
+    entry.income = item._sum.amount || 0
+    entry.incomeCount = item._count
+    accountMap.set(id, entry)
+  }
+
+  const allAccountIds = [...accountMap.keys()]
   const accounts = await prisma.account.findMany({
-    where: { id: { in: byAccount.map((a) => a.accountId!).filter(Boolean) } },
-    select: { id: true, name: true },
+    where: { id: { in: allAccountIds } },
+    select: { id: true, name: true, type: true },
   })
   const accMap = new Map(accounts.map((a) => [a.id, a]))
 
-  const accountBreakdown = byAccount.map((item) => ({
-    name: accMap.get(item.accountId!)?.name || '未知',
-    amount: item._sum.amount || 0,
-    count: item._count,
-  })).sort((a, b) => b.amount - a.amount)
+  const accountBreakdown = allAccountIds.map((id) => {
+    const entry = accountMap.get(id)!
+    const acc = accMap.get(id)
+    return {
+      name: acc?.name || '未知',
+      type: acc?.type || '',
+      expense: entry.expense,
+      income: entry.income,
+      amount: entry.expense + entry.income,
+      count: entry.expenseCount + entry.incomeCount,
+    }
+  }).sort((a, b) => b.amount - a.amount)
 
   // 交叉维度：按 (ledgerId, categoryId) 二维分组
   const crossBreakdown = await getCrossBreakdown(startDate, endDate)

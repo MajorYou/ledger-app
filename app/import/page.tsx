@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useCallback, useEffect, useMemo, useRef, Fragment } from 'react'
-import type { ParsedBillItem } from '@/lib/parsers/pdf-parser'
+import * as XLSX from 'xlsx'
+import type { ParsedBillItem } from '@/lib/parsers'
 import { detectCategoryName } from '@/lib/category-detector'
 import { quickCreateCategory } from '@/lib/actions/categories'
 import { SearchableSelect } from '@/components/searchable-select'
@@ -327,27 +328,50 @@ export default function ImportPage() {
       setSummary(null)
       setCurrentPage(1)
 
-      const pdfjs = await loadPdfJs()
-      const arrayBuffer = await file.arrayBuffer()
-      const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise
-
       let text = ''
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i)
-        const content = await page.getTextContent()
-        text += content.items.map((item) => ('str' in item ? item.str : '')).join(' ') + '\n'
+      if (file.name.toLowerCase().endsWith('.xlsx')) {
+        // XLSX 文件：用 xlsx 库转为 CSV 文本，后端 API 无需改动
+        const buffer = await file.arrayBuffer()
+        const workbook = XLSX.read(buffer)
+        const sheet = workbook.Sheets[workbook.SheetNames[0]]
+        text = XLSX.utils.sheet_to_csv(sheet)
+      } else if (file.name.toLowerCase().endsWith('.csv')) {
+        // CSV 文件：先尝试 UTF-8，若无法识别为支付宝/微信格式则回退 GBK
+        const buffer = await file.arrayBuffer()
+        text = new TextDecoder('utf-8').decode(new Uint8Array(buffer))
+        // 支付宝 CSV 使用 GBK 编码，UTF-8 读取会乱码导致无法识别
+        if (!text.includes('交易时间') && !text.includes('交易分类')) {
+          try {
+            const gbkText = new TextDecoder('gbk').decode(new Uint8Array(buffer))
+            if (gbkText.includes('交易时间') || gbkText.includes('交易分类') ||
+                gbkText.includes('支付宝') || gbkText.includes('微信支付')) {
+              text = gbkText
+            }
+          } catch { /* GBK 解码失败，保留 UTF-8 结果 */ }
+        }
+      } else {
+        // PDF 文件使用 PDF.js 提取文本
+        const pdfjs = await loadPdfJs()
+        const arrayBuffer = await file.arrayBuffer()
+        const doc = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise
+
+        for (let i = 1; i <= doc.numPages; i++) {
+          const page = await doc.getPage(i)
+          const content = await page.getTextContent()
+          text += content.items.map((item) => ('str' in item ? item.str : '')).join(' ') + '\n'
+        }
       }
 
       setMessage('文本提取完成，正在解析...')
       await parseApi(text)
     } catch (e) {
       setLoading(false)
-      setError(`PDF 处理失败: ${e instanceof Error ? e.message : '未知错误'}`)
+      setError(`文件处理失败: ${e instanceof Error ? e.message : '未知错误'}`)
     }
   }
 
   const handlePaste = async () => {
-    const text = prompt('请粘贴招行账单文本内容：')
+    const text = prompt('请粘贴账单文本内容（招行PDF/支付宝CSV/微信CSV）：')
     if (!text?.trim()) return
     await parseApi(text)
   }
@@ -815,17 +839,17 @@ export default function ImportPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
       <h1 className="text-xl font-bold text-zinc-900 mb-2">导入账单</h1>
-      <p className="text-sm text-zinc-500 mb-6">支持招行信用卡 PDF 账单，或粘贴文本</p>
+      <p className="text-sm text-zinc-500 mb-6">支持招行信用卡 PDF、支付宝/微信 CSV、微信 XLSX 账单，或粘贴文本</p>
 
       {items.length === 0 && !loading && !summary && !quickImporting && (
         <div className="bg-white rounded-xl border border-dashed border-zinc-300 p-12 text-center">
           <p className="text-4xl mb-4">📄</p>
-          <p className="text-zinc-600 mb-2">上传招行信用卡 PDF 账单</p>
-          <p className="text-xs text-zinc-400 mb-6">或粘贴账单文本</p>
+          <p className="text-zinc-600 mb-2">上传账单文件（PDF / CSV / XLSX）</p>
+          <p className="text-xs text-zinc-400 mb-6">支持招行信用卡 PDF、支付宝 CSV、微信 CSV / XLSX</p>
           <div className="flex justify-center gap-3">
             <label className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 cursor-pointer transition-colors">
-              选择 PDF 文件
-              <input type="file" accept=".pdf" className="hidden"
+              选择文件
+              <input type="file" accept=".pdf,.csv,.xlsx" className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
             </label>
             <button onClick={handlePaste}
@@ -1331,6 +1355,9 @@ export default function ImportPage() {
                     <span className="text-zinc-900">{item.merchant}</span>
                     {item.description !== item.merchant && (
                       <span className="text-zinc-400 text-xs ml-1">({item.description})</span>
+                    )}
+                    {item.paymentMethod && (
+                      <span className="ml-1.5 px-1.5 py-0.5 bg-zinc-100 text-zinc-500 rounded text-[10px]">{item.paymentMethod}</span>
                     )}
                   </span>
                   {/* 数据质量标签 */}

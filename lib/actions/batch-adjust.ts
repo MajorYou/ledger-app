@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import { revalidatePath } from 'next/cache'
+import { quickCreateCategory } from './categories'
 
 interface NewTransaction {
   merchant: string
@@ -14,6 +15,7 @@ interface NewTransaction {
   type: 'expense' | 'income'
   categoryName?: string
   ledgerName?: string
+  accountName?: string
   transactionTime?: string
 }
 
@@ -28,14 +30,32 @@ interface ParsedOperation {
     keyword?: string
   }
   operations: Array<{
-    type: 'move_ledger' | 'reclassify' | 'update_type' | 'update_merchant' | 'create_transaction' | 'delete_transactions'
+    type: 'move_ledger' | 'reclassify' | 'update_type' | 'update_merchant' | 'create_transaction' | 'delete_transactions' | 'duplicate_transaction'
     targetLedger?: string
     targetCategory?: string
     newValue?: string
+    newType?: 'expense' | 'income' | 'transfer'
+    newMerchant?: string
     newTransactions?: NewTransaction[]
+    count?: number
   }>
   explanation: string
 }
+
+export interface QueryTransaction {
+  id: string
+  merchant: string
+  amount: number
+  type: string
+  transactionTime: string
+  categoryName: string
+  ledgerNames: string[]
+}
+
+export type ParseResult =
+  | { success: true; mode: 'operation'; parsed: ParsedOperation }
+  | { success: true; mode: 'query'; reply: string; transactions?: QueryTransaction[] }
+  | { success: false; error: string }
 
 async function getAIClient(): Promise<OpenAI | null> {
   const apiKey = await getSetting('DEEPSEEK_API_KEY')
@@ -46,7 +66,7 @@ async function getAIClient(): Promise<OpenAI | null> {
 
 export async function parseNaturalLanguage(
   input: string
-): Promise<{ success: true; parsed: ParsedOperation } | { success: false; error: string }> {
+): Promise<ParseResult> {
   const client = await getAIClient()
   if (!client) {
     return { success: false, error: '未配置 AI API Key' }
@@ -72,6 +92,8 @@ export async function parseNaturalLanguage(
 可用分类（含层级，优先匹配子分类）：${JSON.stringify(categories.map(c => ({ name: c.name, type: c.type })))}
 可用账本：${JSON.stringify(ledgers.map(l => l.name))}
 
+【重要】如果用户提到的账本或分类不在上述列表中，你应该自动创建新的。对于 reclassify 操作，即使分类不存在也可以直接指定名称，系统会自动创建。对于 move_ledger 操作，即使账本不存在也可以直接指定名称，系统会自动创建。
+
 用户指令：「${input}」
 
 首先判断意图类型：
@@ -91,10 +113,13 @@ export async function parseNaturalLanguage(
   },
   "operations": [
     {
-      "type": "move_ledger"|"reclassify"|"update_type"|"update_merchant"|"create_transaction"|"delete_transactions",
+      "type": "move_ledger"|"reclassify"|"update_type"|"update_merchant"|"create_transaction"|"delete_transactions"|"duplicate_transaction",
       "targetLedger": "目标账本" 仅 move_ledger,
       "targetCategory": "目标分类" 仅 reclassify,
-      "newValue": "新值" 仅 update_type/update_merchant,
+      "newValue": "新值" 仅 update_type/update_merchant（已废弃，优先用 newType/newMerchant）,
+      "newType": "expense"|"income"|"transfer" 仅 update_type,
+      "newMerchant": "新商户名" 仅 update_merchant,
+      "count": 数字 仅 duplicate_transaction（默认1，表示复制几笔）,
       "newTransactions": [  // 仅 create_transaction
         {
           "merchant": "商户名",
@@ -103,6 +128,7 @@ export async function parseNaturalLanguage(
           "type": "expense"|"income",
           "categoryName": "分类名（必须选子分类，不要选父分类）",
           "ledgerName": "账本名",
+          "accountName": "支付账户名（可选，如\"余额宝\"、\"微信零钱\"、\"招商银行储蓄卡(9496)\"）",
           "transactionTime": "YYYY-MM-DDTHH:mm" 或 null(表示现在)
         }
       ]
@@ -141,7 +167,43 @@ export async function parseNaturalLanguage(
 - 当用户明确说"删除/删掉/清除"交易时 → type 用 "delete_transactions"
 - "删除所有停车记录" → filters: { keyword: "停车" }, operations: [{ type: "delete_transactions" }]
 - "删除上个月所有外卖" → filters: { dateRange: 上月, keyword: "外卖" }, operations: [{ type: "delete_transactions" }]
-- 删除操作必须精确匹配用户意图，不可扩大范围`
+- 删除操作必须精确匹配用户意图，不可扩大范围
+
+修改类型规则（update_type）：
+- "把所有交通改成收入" → operations: [{ type: "update_type", newType: "income" }]
+- newType 可选值："expense"（支出）、"income"（收入）、"transfer"（转账）
+
+修改商户名规则（update_merchant）：
+- "把麦当劳的商户名改成美团外卖" → operations: [{ type: "update_merchant", newMerchant: "美团外卖" }]
+
+复制交易规则（duplicate_transaction）：
+- 当用户说"复制/重复/再来一笔/克隆"某笔交易时，用此操作
+- filters 用于定位要复制的目标交易
+- count 表示复制几笔（默认 1）
+- 示例："把95块的门票复制一笔" → filters: { keyword: "门票", amountRange: { min: 95, max: 95 } }, operations: [{ type: "duplicate_transaction", count: 1 }]
+- 示例："复制上个月的停车费" → filters: { dateRange: 上月, keyword: "停车" }, operations: [{ type: "duplicate_transaction", count: 1 }]
+
+## 响应模式
+
+你有两种响应模式：
+
+### 操作模式
+当用户的指令需要修改数据时（新增、修改、删除、移动、复制交易等），返回上面定义的 JSON 操作指令格式。
+
+### 查询模式
+当用户只是在询问信息、请求分析、查看记录时（如"帮我查一下..."、"有哪些..."、"统计一下..."、"检查一下..."），返回文本回复，不要返回操作指令：
+
+{
+  "mode": "query",
+  "reply": "你的文字回复内容",
+  "filters": { ... }
+}
+
+在查询模式下：
+- reply 是你对用户的文字回复
+- filters 是可选的，如果你需要根据某些交易数据来回答，提供 filters 让系统查询匹配的交易
+- 你可以基于查询到的交易数据来组织 reply 内容
+- 示例：用户问"检查7.18前几天的记录" → { "mode": "query", "reply": "以下是7.15-7.17的交易记录：", "filters": { "dateRange": { "start": "2025-07-15", "end": "2025-07-17" } } }`
 
   const response = await client.chat.completions.create({
     model,
@@ -158,21 +220,67 @@ export async function parseNaturalLanguage(
   }
 
   try {
-    const parsed = JSON.parse(jsonMatch[0]) as ParsedOperation
+    const parsed = JSON.parse(jsonMatch[0])
+
+    // 检查是否是查询模式
+    if (parsed.mode === 'query') {
+      const reply = parsed.reply || '未获取到回复'
+      let transactions: QueryTransaction[] | undefined
+
+      if (parsed.filters && Object.keys(parsed.filters).length > 0) {
+        const where = await buildWhereClause(parsed.filters)
+        const txList = await prisma.transaction.findMany({
+          where: where as any,
+          include: {
+            category: { select: { name: true } },
+            transactionLedgers: {
+              include: { ledger: { select: { name: true } } },
+            },
+          },
+          orderBy: { transactionTime: 'desc' },
+          take: 50,
+        })
+        transactions = txList.map((tx) => ({
+          id: tx.id,
+          merchant: tx.merchant,
+          amount: tx.amount,
+          type: tx.type,
+          transactionTime: tx.transactionTime.toISOString(),
+          categoryName: tx.category?.name || '未分类',
+          ledgerNames: tx.transactionLedgers.map((tl) => tl.ledger.name),
+        }))
+      }
+
+      return { success: true, mode: 'query', reply, transactions }
+    }
+
+    // 操作模式：必须有 operations 数组
+    if (!parsed.operations || !Array.isArray(parsed.operations)) {
+      parsed.operations = []
+    }
+    if (!parsed.filters) {
+      parsed.filters = {}
+    }
     // 规范化：LLM 可能返回 null 的字段用空字符串替代
-    if (parsed.operations) {
-      for (const op of parsed.operations) {
-        if (op.newTransactions) {
-          for (const nt of op.newTransactions) {
-            nt.merchant = nt.merchant || ''
-            nt.description = nt.description || ''
-          }
+    for (const op of parsed.operations) {
+      if (op.newTransactions) {
+        for (const nt of op.newTransactions) {
+          nt.merchant = nt.merchant || ''
+          nt.description = nt.description || ''
         }
       }
+      // 向后兼容：将 newValue 映射到 newType / newMerchant
+      if (op.type === 'update_type' && !op.newType && op.newValue) {
+        op.newType = op.newValue as 'expense' | 'income' | 'transfer'
+      }
+      if (op.type === 'update_merchant' && !op.newMerchant && op.newValue) {
+        op.newMerchant = op.newValue
+      }
     }
-    return { success: true, parsed }
-  } catch {
-    return { success: false, error: 'AI 返回格式异常，请重试' }
+    return { success: true, mode: 'operation', parsed: parsed as ParsedOperation }
+  } catch (e) {
+    logger.error('batch-adjust:parse-error', { raw: content.substring(0, 300), error: String(e) })
+    return { success: false, error: 'AI 返回格式异常，请换一种说法或稍后重试' }
   }
 }
 
@@ -193,32 +301,10 @@ export interface DryRunResult {
   operations: ParsedOperation['operations']
 }
 
-export async function dryRunAdjust(
-  filters: ParsedOperation['filters'],
-  operations: ParsedOperation['operations']
-): Promise<DryRunResult> {
-  // 分离新增交易操作
-  const createOps = operations.filter((op) => op.type === 'create_transaction')
-  const modifyOps = operations.filter((op) => op.type !== 'create_transaction')
-
-  const newTransactions: NewTransaction[] = []
-  for (const op of createOps) {
-    if (op.newTransactions) {
-      newTransactions.push(...op.newTransactions)
-    }
-  }
-
-  // 如果没有修改操作，跳过查询
-  let preview: DryRunResult['preview'] = []
-  if (modifyOps.length === 0) {
-    return { count: newTransactions.length, preview: [], newTransactions, filters, operations }
-  }
-
-  // 构建查询条件
+async function buildWhereClause(filters: ParsedOperation['filters']): Promise<Record<string, unknown>> {
   const where: Record<string, unknown> = {}
 
   if (filters.dateRange) {
-    // 安全构造本地时间：提取日期部分，避免 UTC 时区偏移
     const [sy, sm, sd] = filters.dateRange.start.slice(0, 10).split('-').map(Number)
     const [ey, em, ed] = filters.dateRange.end.slice(0, 10).split('-').map(Number)
     where.transactionTime = {
@@ -263,41 +349,103 @@ export async function dryRunAdjust(
     }
   }
 
-  const transactions = await prisma.transaction.findMany({
-    where: where as any,
-    include: {
-      category: { select: { name: true } },
-      transactionLedgers: {
-        include: { ledger: { select: { name: true } } },
-      },
-    },
-    orderBy: { transactionTime: 'desc' },
-  })
+  return where
+}
 
-  preview = transactions.map((tx) => {
-    const changes: string[] = []
-    for (const op of modifyOps) {
-      if (op.type === 'move_ledger' && op.targetLedger) {
-        changes.push(`账本 → ${op.targetLedger}`)
-      } else if (op.type === 'reclassify' && op.targetCategory) {
-        changes.push(`分类 → ${op.targetCategory}`)
-      } else if (op.type === 'delete_transactions') {
-        changes.push('🗑 删除')
+export async function dryRunAdjust(
+  filters: ParsedOperation['filters'],
+  operations: ParsedOperation['operations']
+): Promise<DryRunResult> {
+  // 分离新增交易操作和复制交易操作
+  const createOps = operations.filter((op) => op.type === 'create_transaction')
+  const duplicateOps = operations.filter((op) => op.type === 'duplicate_transaction')
+  const modifyOps = operations.filter((op) => op.type !== 'create_transaction' && op.type !== 'duplicate_transaction')
+
+  const newTransactions: NewTransaction[] = []
+  for (const op of createOps) {
+    if (op.newTransactions) {
+      newTransactions.push(...op.newTransactions)
+    }
+  }
+
+  // 处理复制交易：查询目标交易，生成复制预览
+  let duplicatePreviews: DryRunResult['preview'] = []
+  if (duplicateOps.length > 0) {
+    const dupWhere = await buildWhereClause(filters)
+    const dupTransactions = await prisma.transaction.findMany({
+      where: dupWhere as any,
+      include: {
+        category: { select: { name: true } },
+        transactionLedgers: {
+          include: { ledger: { select: { name: true } } },
+        },
+      },
+      orderBy: { transactionTime: 'desc' },
+    })
+    for (const tx of dupTransactions) {
+      for (const op of duplicateOps) {
+        const dupCount = op.count || 1
+        for (let i = 0; i < dupCount; i++) {
+          duplicatePreviews.push({
+            id: `${tx.id}_dup_${i}`,
+            merchant: tx.merchant,
+            amount: tx.amount,
+            type: tx.type,
+            transactionTime: tx.transactionTime.toISOString(),
+            categoryName: tx.category?.name || '未分类',
+            ledgerNames: tx.transactionLedgers.map((tl) => tl.ledger.name),
+            changes: ['📋 复制'],
+          })
+        }
       }
     }
-    return {
-      id: tx.id,
-      merchant: tx.merchant,
-      amount: tx.amount,
-      type: tx.type,
-      transactionTime: tx.transactionTime.toISOString(),
-      categoryName: tx.category?.name || '未分类',
-      ledgerNames: tx.transactionLedgers.map((tl) => tl.ledger.name),
-      changes,
-    }
-  })
+  }
 
-  return { count: preview.length + newTransactions.length, preview, newTransactions, filters, operations }
+  // 如果没有修改操作，跳过查询
+  let preview: DryRunResult['preview'] = []
+  if (modifyOps.length > 0) {
+    const where = await buildWhereClause(filters)
+
+    const transactions = await prisma.transaction.findMany({
+      where: where as any,
+      include: {
+        category: { select: { name: true } },
+        transactionLedgers: {
+          include: { ledger: { select: { name: true } } },
+        },
+      },
+      orderBy: { transactionTime: 'desc' },
+    })
+
+    preview = transactions.map((tx) => {
+      const changes: string[] = []
+      for (const op of modifyOps) {
+        if (op.type === 'move_ledger' && op.targetLedger) {
+          changes.push(`账本 → ${op.targetLedger}`)
+        } else if (op.type === 'reclassify' && op.targetCategory) {
+          changes.push(`分类 → ${op.targetCategory}`)
+        } else if (op.type === 'update_type' && op.newType) {
+          changes.push(`类型 → ${op.newType}`)
+        } else if (op.type === 'update_merchant' && op.newMerchant) {
+          changes.push(`商户 → ${op.newMerchant}`)
+        } else if (op.type === 'delete_transactions') {
+          changes.push('🗑 删除')
+        }
+      }
+      return {
+        id: tx.id,
+        merchant: tx.merchant,
+        amount: tx.amount,
+        type: tx.type,
+        transactionTime: tx.transactionTime.toISOString(),
+        categoryName: tx.category?.name || '未分类',
+        ledgerNames: tx.transactionLedgers.map((tl) => tl.ledger.name),
+        changes,
+      }
+    })
+  }
+
+  return { count: preview.length + newTransactions.length + duplicatePreviews.length, preview: [...preview, ...duplicatePreviews], newTransactions, filters, operations }
 }
 
 export async function executeAdjust(
@@ -333,6 +481,15 @@ export async function executeAdjust(
       if (cat) categoryId = cat.id
     }
 
+    // 查找支付账户
+    let sourceAccountId: string | null = null
+    if (nt.accountName) {
+      const account = await prisma.account.findFirst({
+        where: { name: { contains: nt.accountName } },
+      })
+      if (account) sourceAccountId = account.id
+    }
+
     const tx = await prisma.transaction.create({
       data: {
         type: nt.type,
@@ -341,10 +498,18 @@ export async function executeAdjust(
         description: nt.description || '',
         transactionTime: nt.transactionTime ? new Date(nt.transactionTime) : new Date(),
         categoryId,
+        sourceAccountId,
         createdById: user.id,
         isConfirmed: !!categoryId,
       },
     })
+
+    // 余额联动
+    if (nt.type === 'expense' && sourceAccountId) {
+      await prisma.account.update({ where: { id: sourceAccountId }, data: { balance: { increment: -nt.amount } } })
+    } else if (nt.type === 'income' && sourceAccountId) {
+      await prisma.account.update({ where: { id: sourceAccountId }, data: { balance: { increment: nt.amount } } })
+    }
 
     // 关联账本
     if (nt.ledgerName) {
@@ -362,9 +527,10 @@ export async function executeAdjust(
     count++
   }
 
-  // 处理修改操作
-  const modifyOps = operations.filter((op) => op.type !== 'create_transaction')
-  for (const tx of preview) {
+  // 处理修改操作（排除复制预览条目，它们的 ID 是虚拟的）
+  const modifyOps = operations.filter((op) => op.type !== 'create_transaction' && op.type !== 'duplicate_transaction')
+  const modifyPreview = preview.filter((tx) => !tx.id.includes('_dup_'))
+  for (const tx of modifyPreview) {
     for (const op of modifyOps) {
       if (op.type === 'move_ledger' && op.targetLedger) {
         let ledger = await prisma.ledger.findFirst({
@@ -387,14 +553,43 @@ export async function executeAdjust(
       }
 
       if (op.type === 'delete_transactions') {
+        // 先读取被删除的交易，回滚余额
+        const txToDelete = await prisma.transaction.findUnique({ where: { id: tx.id } })
+        if (txToDelete) {
+          if (txToDelete.type === 'expense' && txToDelete.sourceAccountId) {
+            await prisma.account.update({ where: { id: txToDelete.sourceAccountId }, data: { balance: { increment: txToDelete.amount } } })
+          } else if (txToDelete.type === 'income' && txToDelete.toAccountId) {
+            await prisma.account.update({ where: { id: txToDelete.toAccountId }, data: { balance: { increment: -txToDelete.amount } } })
+          } else if (txToDelete.type === 'transfer') {
+            if (txToDelete.sourceAccountId) await prisma.account.update({ where: { id: txToDelete.sourceAccountId }, data: { balance: { increment: txToDelete.amount } } })
+            if (txToDelete.toAccountId) await prisma.account.update({ where: { id: txToDelete.toAccountId }, data: { balance: { increment: -txToDelete.amount } } })
+          }
+        }
         await prisma.transaction.delete({ where: { id: tx.id } })
         logger.info('batch-adjust:deleted', { id: tx.id, merchant: tx.merchant })
       }
 
       if (op.type === 'reclassify' && op.targetCategory) {
-        const cat = await prisma.category.findFirst({
+        let cat = await prisma.category.findFirst({
           where: { name: { contains: op.targetCategory } },
         })
+        if (!cat) {
+          // 自动创建分类：找到一个根分类作为父分类
+          const txData = await prisma.transaction.findUnique({
+            where: { id: tx.id },
+            select: { type: true },
+          })
+          const txType = txData?.type || 'expense'
+          const rootCategory = await prisma.category.findFirst({
+            where: { parentId: null, type: txType },
+          })
+          if (rootCategory) {
+            const result = await quickCreateCategory(op.targetCategory, rootCategory.id, txType)
+            if (result.success && result.category) {
+              cat = await prisma.category.findUnique({ where: { id: result.category.id } })
+            }
+          }
+        }
         if (cat) {
           await prisma.transaction.update({
             where: { id: tx.id },
@@ -404,8 +599,72 @@ export async function executeAdjust(
           logger.warn('batch-adjust:category-not-found', op.targetCategory)
         }
       }
+
+      if (op.type === 'update_type' && op.newType) {
+        await prisma.transaction.update({
+          where: { id: tx.id },
+          data: { type: op.newType },
+        })
+        logger.info('batch-adjust:update-type', { id: tx.id, newType: op.newType })
+      }
+
+      if (op.type === 'update_merchant' && op.newMerchant) {
+        await prisma.transaction.update({
+          where: { id: tx.id },
+          data: { merchant: op.newMerchant },
+        })
+        logger.info('batch-adjust:update-merchant', { id: tx.id, newMerchant: op.newMerchant })
+      }
     }
     count++
+  }
+
+  // 处理复制交易操作
+  const duplicateOps = operations.filter((op) => op.type === 'duplicate_transaction')
+  if (duplicateOps.length > 0) {
+    const dupWhere = await buildWhereClause(filters)
+    const dupTransactions = await prisma.transaction.findMany({
+      where: dupWhere as any,
+      include: {
+        transactionLedgers: true,
+      },
+    })
+    for (const tx of dupTransactions) {
+      for (const op of duplicateOps) {
+        const dupCount = op.count || 1
+        for (let i = 0; i < dupCount; i++) {
+          const newTx = await prisma.transaction.create({
+            data: {
+              type: tx.type,
+              amount: tx.amount,
+              merchant: tx.merchant,
+              description: tx.description,
+              transactionTime: new Date(),
+              categoryId: tx.categoryId,
+              sourceAccountId: tx.sourceAccountId,
+              toAccountId: tx.toAccountId,
+              channel: tx.channel,
+              createdById: user.id,
+              isConfirmed: true,
+              llmClassified: false,
+            },
+          })
+          // 余额联动
+          if (tx.type === 'expense' && tx.sourceAccountId) {
+            await prisma.account.update({ where: { id: tx.sourceAccountId }, data: { balance: { increment: -tx.amount } } })
+          } else if (tx.type === 'income' && tx.sourceAccountId) {
+            await prisma.account.update({ where: { id: tx.sourceAccountId }, data: { balance: { increment: tx.amount } } })
+          }
+          // 复制账本关联
+          for (const tl of tx.transactionLedgers) {
+            await prisma.transactionLedger.create({
+              data: { transactionId: newTx.id, ledgerId: tl.ledgerId },
+            })
+          }
+          count++
+        }
+      }
+    }
   }
 
   revalidatePath('/')

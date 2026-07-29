@@ -38,18 +38,23 @@ model FamilyInvite {
 
 // ---- 支付账户 ----
 model Account {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  name      String
-  type      String   @default("general") // general / credit / debit / ewallet
-  currency  String   @default("CNY")
-  balance   Float    @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  name        String
+  type        String   @default("savings") // savings / cash / credit / prepaid / investment
+  institution String?  // 银行/平台名称，如"招商银行"、"支付宝"
+  last4Digits String?  // 银行卡后四位，用于跨平台匹配
+  currency    String   @default("CNY")
+  balance     Float    @default(0)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  transactions Transaction[]
+  sourceTransactions Transaction[] @relation("SourceAccount")
+  destTransactions   Transaction[] @relation("DestAccount")
+
+  @@unique([userId, institution, last4Digits])
 }
 
 // ---- 账本（支持层级） ----
@@ -94,8 +99,12 @@ model Transaction {
   transactionTime DateTime  @default(now())
   categoryId      String?
   category        Category? @relation(fields: [categoryId], references: [id])
-  accountId       String?
-  account         Account?  @relation(fields: [accountId], references: [id])
+  sourceAccountId String?   @map("accountId")
+  sourceAccount   Account?  @relation("SourceAccount", fields: [sourceAccountId], references: [id])
+  toAccountId     String?
+  toAccount       Account?  @relation("DestAccount", fields: [toAccountId], references: [id])
+  channel         String?   // 支付通道：支付宝/微信/云闪付
+  externalOrderId String?   // 外部订单号，用于精确去重
   createdById     String
   createdBy       User      @relation(fields: [createdById], references: [id])
   isConfirmed     Boolean   @default(true)
@@ -107,6 +116,8 @@ model Transaction {
   updatedAt       DateTime  @updatedAt
 
   transactionLedgers TransactionLedger[]
+
+  @@index([externalOrderId])
 }
 
 // ---- 交易↔账本 多对多 ----

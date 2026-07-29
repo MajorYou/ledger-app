@@ -12,12 +12,13 @@ interface ReasonDetail {
 }
 
 interface DedupPair {
-  a: { id: string; merchant: string; amount: number; type: string; transactionTime: string; categoryName: string | null }
-  b: { id: string; merchant: string; amount: number; type: string; transactionTime: string; categoryName: string | null }
+  a: { id: string; merchant: string; amount: number; type: string; transactionTime: string; categoryName: string | null; channel?: string | null; sourceAccountName?: string | null }
+  b: { id: string; merchant: string; amount: number; type: string; transactionTime: string; categoryName: string | null; channel?: string | null; sourceAccountName?: string | null }
   score: number
   reasons: string[]
   reasonDetails: ReasonDetail[]
   isRefund: boolean
+  duplicateType: 'exact' | 'cross_platform' | 'fuzzy'
 }
 
 interface MergeTransaction {
@@ -352,6 +353,21 @@ export default function DedupPage() {
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${scoreColor(pair.score)}`}>
                         相似度 {(pair.score * 100).toFixed(0)}%
                       </span>
+                      {pair.duplicateType === 'exact' && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                          🔴 精确重复
+                        </span>
+                      )}
+                      {pair.duplicateType === 'cross_platform' && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                          🟠 跨平台重复
+                        </span>
+                      )}
+                      {pair.duplicateType === 'fuzzy' && !pair.isRefund && (
+                        <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200">
+                          🟡 疑似重复
+                        </span>
+                      )}
                       {pair.isRefund && (
                         <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
                           💸 退款匹配
@@ -401,6 +417,12 @@ export default function DedupPage() {
                       </div>
                       <p className="text-sm text-zinc-700 truncate font-medium">{pair.a.merchant || '未命名商户'}</p>
                       <p className="text-xs text-zinc-400 mt-1">{pair.a.transactionTime.replace('T', ' ')}</p>
+                      {pair.a.channel && (
+                        <span className="inline-block mt-1 text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">📡 {pair.a.channel}</span>
+                      )}
+                      {pair.a.sourceAccountName && (
+                        <span className="inline-block mt-1 ml-1 text-xs text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded">💳 {pair.a.sourceAccountName}</span>
+                      )}
                       {pair.a.categoryName && (
                         <span className="inline-block mt-1 text-xs text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">{pair.a.categoryName}</span>
                       )}
@@ -422,6 +444,12 @@ export default function DedupPage() {
                       </div>
                       <p className="text-sm text-zinc-700 truncate font-medium">{pair.b.merchant || '未命名商户'}</p>
                       <p className="text-xs text-zinc-400 mt-1">{pair.b.transactionTime.replace('T', ' ')}</p>
+                      {pair.b.channel && (
+                        <span className="inline-block mt-1 text-xs text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">📡 {pair.b.channel}</span>
+                      )}
+                      {pair.b.sourceAccountName && (
+                        <span className="inline-block mt-1 ml-1 text-xs text-zinc-500 bg-zinc-100 px-1.5 py-0.5 rounded">💳 {pair.b.sourceAccountName}</span>
+                      )}
                       {pair.b.categoryName && (
                         <span className="inline-block mt-1 text-xs text-zinc-400 bg-zinc-100 px-1.5 py-0.5 rounded">{pair.b.categoryName}</span>
                       )}

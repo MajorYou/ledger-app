@@ -61,8 +61,8 @@ function AiPanel({ onClose }: { onClose: () => void }) {
 function AiChat() {
   const { refresh } = useRefresh()
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string; preview?: unknown; isDelete?: boolean; deleteIds?: string[] }>>([
-    { role: 'ai', content: '你好！我是记账助手，你可以直接跟我说：\n\n• "今天午饭麦当劳 35"\n• "昨晚打车 28"\n• "把上周餐饮挪到旅行账本"\n• "删除本月所有停车记录"\n\n我会帮你记账或整理账单 👇' },
+  const [messages, setMessages] = useState<Array<{ role: 'user' | 'ai'; content: string; preview?: unknown; isDelete?: boolean; deleteIds?: string[]; queryTransactions?: Array<{ id: string; merchant: string; amount: number; type: string; transactionTime: string; categoryName: string; ledgerNames: string[] }> }>>([
+    { role: 'ai', content: '你好！我是记账助手，你可以直接跟我说：\n\n• "今天午饭麦当劳 35"\n• "昨晚打车 28"\n• "把上周餐饮挪到旅行账本"\n• "删除本月所有停车记录"\n• "帮我查一下上周的交易"\n\n我会帮你记账或整理账单 👇' },
   ])
   const [loading, setLoading] = useState(false)
   const [confirmedIdx, setConfirmedIdx] = useState<number | null>(null)
@@ -85,6 +85,17 @@ function AiChat() {
         return
       }
 
+      // 查询模式：直接展示回复
+      if (result.mode === 'query') {
+        setMessages((prev) => [...prev, {
+          role: 'ai',
+          content: result.reply,
+          queryTransactions: result.transactions,
+        }])
+        setLoading(false)
+        return
+      }
+
       const preview = await dryRunAdjust(result.parsed.filters, result.parsed.operations)
 
       if (preview.count === 0) {
@@ -98,6 +109,8 @@ function AiChat() {
 
       // 检测是否是删除操作
       const isDelete = result.parsed.operations.some((op: { type: string }) => op.type === 'delete_transactions')
+      // 检测是否是复制操作
+      const isDuplicate = result.parsed.operations.some((op: { type: string }) => op.type === 'duplicate_transaction')
 
       let previewText = result.parsed.explanation + '\n\n'
       if (preview.newTransactions.length > 0) {
@@ -109,6 +122,8 @@ function AiChat() {
       if (preview.preview.length > 0) {
         if (isDelete) {
           previewText += `🗑 将删除 ${preview.preview.length} 笔：\n`
+        } else if (isDuplicate) {
+          previewText += `📋 将复制 ${preview.preview.length} 笔：\n`
         } else {
           previewText += `🔄 将修改 ${preview.preview.length} 笔：\n`
         }
@@ -157,6 +172,26 @@ function AiChat() {
               }`}
             >
               {msg.content}
+              {/* 查询模式：展示匹配的交易卡片 */}
+              {msg.queryTransactions && msg.queryTransactions.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {msg.queryTransactions.map((tx) => (
+                    <div key={tx.id} className="flex items-center gap-2 bg-white/60 rounded-lg px-2 py-1.5 text-xs">
+                      <span className="text-zinc-400 w-16 shrink-0">
+                        {new Date(tx.transactionTime).toLocaleDateString('zh-CN')}
+                      </span>
+                      <span className="text-zinc-700 flex-1 truncate">{tx.merchant}</span>
+                      <span className="text-zinc-400">{tx.categoryName}</span>
+                      <span className={tx.type === 'income' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                        {tx.type === 'income' ? '+' : '-'}¥{tx.amount.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {msg.queryTransactions && msg.queryTransactions.length === 0 && (
+                <p className="mt-2 text-xs text-zinc-400">未找到匹配的交易记录</p>
+              )}
               {msg.preview && confirmedIdx !== i ? (
                 <button
                   onClick={() => handleConfirm(i, (msg.preview as any).filters, (msg.preview as any).operations)}

@@ -40,6 +40,12 @@ export async function NavBar() {
                 账本
               </Link>
               <Link
+                href="/accounts"
+                className="text-zinc-600 hover:text-zinc-900 transition-colors"
+              >
+                账户
+              </Link>
+              <Link
                 href="/categories"
                 className="text-zinc-600 hover:text-zinc-900 transition-colors"
               >

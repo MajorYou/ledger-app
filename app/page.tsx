@@ -40,7 +40,8 @@ export default async function DashboardPage() {
     orderBy: { transactionTime: 'desc' },
     include: {
       category: { select: { id: true, name: true, icon: true, color: true } },
-      account: { select: { id: true, name: true } },
+      sourceAccount: { select: { id: true, name: true, type: true } },
+      toAccount: { select: { id: true, name: true, type: true } },
       transactionLedgers: {
         include: { ledger: { select: { id: true, name: true, color: true } } },
       },
@@ -151,15 +152,19 @@ export default async function DashboardPage() {
                   </p>
                   <p className="text-xs text-zinc-400">
                     {tx.transactionTime.toLocaleDateString('zh-CN')}
-                    {tx.account && ` · ${tx.account.name}`}
+                    {tx.type === 'transfer' && tx.sourceAccount && tx.toAccount
+                      ? ` · ${tx.sourceAccount.name} → ${tx.toAccount.name}`
+                      : tx.sourceAccount
+                        ? ` · ${tx.sourceAccount.name}`
+                        : ''}
                   </p>
                 </div>
                 <span
                   className={`text-sm font-semibold ${
-                    tx.type === 'income' ? 'text-green-500' : 'text-red-500'
+                    tx.type === 'income' ? 'text-green-500' : tx.type === 'transfer' ? 'text-blue-500' : 'text-red-500'
                   }`}
                 >
-                  {tx.type === 'income' ? '+' : '-'}¥{tx.amount.toFixed(2)}
+                  {tx.type === 'income' ? '+' : tx.type === 'transfer' ? '' : '-'}¥{tx.amount.toFixed(2)}
                 </span>
               </div>
             ))}

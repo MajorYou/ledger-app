@@ -100,9 +100,9 @@ async function main() {
   // 创建默认账户
   await prisma.account.createMany({
     data: [
-      { userId: host.id, name: '现金', type: 'general', currency: 'CNY' },
-      { userId: host.id, name: '支付宝', type: 'ewallet', currency: 'CNY' },
-      { userId: host.id, name: '微信支付', type: 'ewallet', currency: 'CNY' },
+      { userId: host.id, name: '现金', type: 'cash', currency: 'CNY' },
+      { userId: host.id, name: '支付宝', type: 'prepaid', currency: 'CNY' },
+      { userId: host.id, name: '微信支付', type: 'prepaid', currency: 'CNY' },
     ],
   })
   console.log('Created default accounts')

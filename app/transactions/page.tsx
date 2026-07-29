@@ -17,7 +17,11 @@ export default async function TransactionsPage({
   const filters: TransactionFilters = {
     categoryId: typeof sp.category === 'string' ? sp.category : undefined,
     ledgerId: typeof sp.ledger === 'string' ? sp.ledger : undefined,
-    accountId: typeof sp.account === 'string' ? sp.account : undefined,
+    accountId: typeof sp.sourceAccount === 'string'
+      ? sp.sourceAccount
+      : typeof sp.account === 'string'
+        ? sp.account
+        : undefined,
     dateFrom: typeof sp.dateFrom === 'string' ? sp.dateFrom : undefined,
     dateTo: typeof sp.dateTo === 'string' ? sp.dateTo : undefined,
     amountMin: typeof sp.amountMin === 'string' ? sp.amountMin : undefined,

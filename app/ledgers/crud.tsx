@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
 import { createLedger, updateLedger, deleteLedger } from '@/lib/actions/ledgers'
 
 const LEDGER_TYPES: Record<string, string> = {
@@ -157,6 +157,16 @@ function LedgerForm({
   onClose: () => void
   onSaved: () => void
 }) {
+  const [isPending, startTransition] = useTransition()
+
+  const handleSubmit = (formData: FormData) => {
+    const action = editing ? updateLedger.bind(null, editing.id) : createLedger
+    startTransition(async () => {
+      await action(formData)
+      onSaved()
+    })
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
@@ -169,7 +179,7 @@ function LedgerForm({
           </button>
         </div>
         <form
-          action={editing ? updateLedger.bind(null, editing.id) : createLedger}
+          action={handleSubmit}
           className="space-y-4"
         >
           <div>
@@ -233,10 +243,10 @@ function LedgerForm({
           </div>
           <button
             type="submit"
-            onClick={onSaved}
-            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            disabled={isPending}
+            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
-            {editing ? '更新' : '创建'}
+            {isPending ? '保存中...' : (editing ? '更新' : '创建')}
           </button>
         </form>
       </div>

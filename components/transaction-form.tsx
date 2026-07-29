@@ -16,6 +16,7 @@ interface Category {
 interface Account {
   id: string
   name: string
+  type?: string
 }
 
 interface Ledger {
@@ -31,7 +32,9 @@ interface Transaction {
   description: string
   transactionTime: Date
   categoryId: string | null
-  accountId: string | null
+  sourceAccountId: string | null
+  toAccountId: string | null
+  channel: string | null
   transactionLedgers: { ledgerId: string }[]
 }
 
@@ -72,8 +75,14 @@ export function TransactionForm({
   const [selectedCategoryId, setSelectedCategoryId] = useState(
     transaction?.categoryId || ''
   )
-  const [selectedAccountId, setSelectedAccountId] = useState(
-    transaction?.accountId || ''
+  const [sourceAccountId, setSourceAccountId] = useState(
+    transaction?.sourceAccountId || ''
+  )
+  const [toAccountId, setToAccountId] = useState(
+    transaction?.toAccountId || ''
+  )
+  const [channel, setChannel] = useState(
+    transaction?.channel || ''
   )
   const [classifyResult, setClassifyResult] = useState<ClassifyResult | null>(null)
   const [classifying, setClassifying] = useState(false)
@@ -94,6 +103,15 @@ export function TransactionForm({
   const incomeCategories = localCategories.filter((c) => c.type === 'income')
   const visibleCategories = type === 'expense' ? expenseCategories : incomeCategories
 
+  // 账户类型 emoji 映射
+  const accountTypeEmoji: Record<string, string> = {
+    savings: '💳',
+    credit: '💰',
+    prepaid: '📱',
+    investment: '📈',
+    cash: '💵',
+  }
+
   // 构建可搜索下拉的选项
   const categoryOptions = useMemo(() => {
     const opts: Array<{ value: string; label: string; group?: string }> = []
@@ -109,7 +127,10 @@ export function TransactionForm({
   }, [visibleCategories])
 
   const accountOptions = useMemo(
-    () => accounts.map((a) => ({ value: a.id, label: a.name })),
+    () => accounts.map((a) => ({
+      value: a.id,
+      label: a.type ? `${accountTypeEmoji[a.type] || ''} ${a.name}` : a.name,
+    })),
     [accounts]
   )
 
@@ -215,6 +236,17 @@ export function TransactionForm({
             }`}
           >
             💰 收入
+          </button>
+          <button
+            type="button"
+            onClick={() => setType('transfer')}
+            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+              type === 'transfer'
+                ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
+                : 'bg-zinc-100 text-zinc-600 border-2 border-transparent'
+            }`}
+          >
+            🔄 转账
           </button>
         </div>
         <input type="hidden" name="type" value={type} />
@@ -341,18 +373,82 @@ export function TransactionForm({
         )}
       </div>
 
-      {/* 账户 */}
+      {/* 账户选择区域 - 根据交易类型动态展示 */}
+      {type === 'expense' && (
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1">
+            支出账户
+          </label>
+          <SearchableSelect
+            options={accountOptions}
+            value={sourceAccountId}
+            onChange={setSourceAccountId}
+            placeholder="选择账户"
+          />
+          <input type="hidden" name="sourceAccountId" value={sourceAccountId} />
+        </div>
+      )}
+      {type === 'income' && (
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 mb-1">
+            收入账户
+          </label>
+          <SearchableSelect
+            options={accountOptions}
+            value={toAccountId}
+            onChange={setToAccountId}
+            placeholder="选择账户"
+          />
+          <input type="hidden" name="toAccountId" value={toAccountId} />
+        </div>
+      )}
+      {type === 'transfer' && (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 mb-1">
+              转出账户
+            </label>
+            <SearchableSelect
+              options={accountOptions}
+              value={sourceAccountId}
+              onChange={setSourceAccountId}
+              placeholder="选择转出账户"
+            />
+            <input type="hidden" name="sourceAccountId" value={sourceAccountId} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 mb-1">
+              转入账户
+            </label>
+            <SearchableSelect
+              options={accountOptions}
+              value={toAccountId}
+              onChange={setToAccountId}
+              placeholder="选择转入账户"
+            />
+            <input type="hidden" name="toAccountId" value={toAccountId} />
+          </div>
+        </>
+      )}
+
+      {/* 支付通道 */}
       <div>
         <label className="block text-sm font-medium text-zinc-700 mb-1">
-          支付账户
+          支付通道
         </label>
-        <SearchableSelect
-          options={accountOptions}
-          value={selectedAccountId}
-          onChange={setSelectedAccountId}
-          placeholder="选择账户"
-        />
-        <input type="hidden" name="accountId" value={selectedAccountId} />
+        <select
+          name="channel"
+          value={channel}
+          onChange={(e) => setChannel(e.target.value)}
+          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">不指定</option>
+          <option value="支付宝">支付宝</option>
+          <option value="微信">微信</option>
+          <option value="云闪付">云闪付</option>
+          <option value="现金">现金</option>
+          <option value="其他">其他</option>
+        </select>
       </div>
 
       {/* 账本 */}

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
-import { parseBillText } from '@/lib/parsers/pdf-parser'
+import { parseBillTextAuto } from '@/lib/parsers'
 import { logger } from '@/lib/logger'
 import { batchCheckDuplicates } from '@/lib/dedup'
 
@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     logger.info('import:text', { length: text.length })
-    const items = await parseBillText(text)
+    const items = await parseBillTextAuto(text)
     logger.info('import:done', { count: items.length })
 
     // 批量检查重复

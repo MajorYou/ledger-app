@@ -6,6 +6,8 @@ import { loadAgentSettings, findMatchingExpenses } from '@/lib/agent-settings'
 import { findDuplicates, DedupPair } from '@/lib/dedup'
 import { classifyTransaction } from '@/lib/ai/classifier'
 import { logger } from '@/lib/logger'
+import { findOrCreateAccount } from '@/lib/account-mapper'
+import { safeParseDate } from '@/lib/date-utils'
 
 async function autoLearnCategory(merchant: string, categoryId: string): Promise<boolean> {
   const count = await prisma.transaction.count({
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const item = await request.json()
-    const { merchant, amount, type, transactionDate, description, categoryId: manualCategoryId, ledgerId, refundAction } = item
+    const { merchant, amount, type, transactionDate, description, categoryId: manualCategoryId, ledgerId, refundAction, paymentMethod, channel, externalOrderId } = item
 
     const agentSettings = await loadAgentSettings()
 
@@ -152,17 +154,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 创建交易
-    let txTime: Date
-    if (transactionDate) {
-      if (transactionDate.includes('T')) {
-        txTime = new Date(transactionDate)
-      } else {
-        const [y, m, d] = transactionDate.slice(0, 10).split('-').map(Number)
-        txTime = new Date(y, m - 1, d)
-      }
-    } else {
-      txTime = new Date()
+    const txTime = transactionDate ? safeParseDate(transactionDate) : new Date()
+    // 如果有 paymentMethod，尝试映射到账户
+    let sourceAccountId: string | null = null
+    if (paymentMethod) {
+      sourceAccountId = await findOrCreateAccount(user.id, paymentMethod)
     }
+
     await prisma.transaction.create({
       data: {
         type: type || 'expense',
@@ -173,6 +171,9 @@ export async function POST(request: NextRequest) {
         categoryId,
         createdById: user.id,
         isConfirmed: !!categoryId,
+        ...(sourceAccountId ? { sourceAccountId } : {}),
+        channel: channel || null,
+        externalOrderId: externalOrderId || null,
         ...(ledgerId ? {
           transactionLedgers: { create: { ledgerId } },
         } : {}),

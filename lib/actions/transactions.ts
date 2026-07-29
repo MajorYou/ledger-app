@@ -5,6 +5,19 @@ import { getSession } from '@/lib/auth'
 import { revalidatePath } from 'next/cache'
 import type { Prisma } from '@prisma/client'
 
+/** 调整账户余额（在事务中调用） */
+async function adjustBalance(
+  tx: Prisma.TransactionClient,
+  accountId: string | null,
+  delta: number
+): Promise<void> {
+  if (!accountId || delta === 0) return
+  await tx.account.update({
+    where: { id: accountId },
+    data: { balance: { increment: delta } },
+  })
+}
+
 export interface TransactionFilters {
   categoryId?: string
   ledgerId?: string
@@ -40,7 +53,8 @@ export async function getTransactionsPaginated(
     take,
     include: {
       category: { select: { id: true, name: true, icon: true, color: true } },
-      account: { select: { id: true, name: true } },
+      sourceAccount: { select: { id: true, name: true, type: true } },
+      toAccount: { select: { id: true, name: true, type: true } },
       transactionLedgers: {
         include: { ledger: { select: { id: true, name: true, color: true } } },
       },
@@ -71,8 +85,12 @@ function buildWhere(filters: TransactionFilters): Prisma.TransactionWhereInput {
   if (filters.ledgerId) {
     where.transactionLedgers = { some: { ledgerId: filters.ledgerId } }
   }
+  // accountId 筛选：AND 条件，必须在指定账户（source 或 dest）中
   if (filters.accountId) {
-    where.accountId = filters.accountId
+    where.OR = [
+      { sourceAccountId: filters.accountId },
+      { toAccountId: filters.accountId },
+    ]
   }
   if (filters.dateFrom || filters.dateTo) {
     const time: Prisma.DateTimeFilter = {}
@@ -89,12 +107,24 @@ function buildWhere(filters: TransactionFilters): Prisma.TransactionWhereInput {
   if (filters.type && filters.type !== 'all') {
     where.type = filters.type
   }
+  // keyword 搜索：独立的 OR 条件组（在商户/描述中搜索）
   if (filters.keyword) {
     const kw = filters.keyword
-    where.OR = [
+    const keywordOr: Prisma.TransactionWhereInput[] = [
       { merchant: { contains: kw } },
       { description: { contains: kw } },
     ]
+    // 如果已有 accountId 的 OR 条件，需要用 AND 组合
+    if (where.OR) {
+      const accountOr = where.OR
+      delete where.OR
+      where.AND = [
+        { OR: accountOr },
+        { OR: keywordOr },
+      ]
+    } else {
+      where.OR = keywordOr
+    }
   }
 
   return where
@@ -126,27 +156,45 @@ export async function createTransaction(_prevState: unknown, formData: FormData)
     ? new Date(formData.get('transactionTime') as string)
     : new Date()
   const categoryId = (formData.get('categoryId') as string) || null
-  const accountId = (formData.get('accountId') as string) || null
+  const sourceAccountId = (formData.get('sourceAccountId') as string) || null
+  const toAccountId = (formData.get('toAccountId') as string) || null
+  const channel = (formData.get('channel') as string) || null
   const ledgerIds = formData.getAll('ledgerIds') as string[]
 
   if (!amount || amount <= 0) {
     return { error: '请输入有效金额' }
   }
 
-  const transaction = await prisma.transaction.create({
-    data: {
-      type,
-      amount,
-      merchant,
-      description,
-      transactionTime,
-      categoryId,
-      accountId,
-      createdById: user.id,
-      transactionLedgers: {
-        create: ledgerIds.map((ledgerId) => ({ ledgerId })),
+  const transaction = await prisma.$transaction(async (tx) => {
+    const created = await tx.transaction.create({
+      data: {
+        type,
+        amount,
+        merchant,
+        description,
+        transactionTime,
+        categoryId,
+        sourceAccountId,
+        toAccountId,
+        channel,
+        createdById: user.id,
+        transactionLedgers: {
+          create: ledgerIds.map((ledgerId) => ({ ledgerId })),
+        },
       },
-    },
+    })
+
+    // 余额联动
+    if (type === 'expense') {
+      await adjustBalance(tx, sourceAccountId, -amount)
+    } else if (type === 'income') {
+      await adjustBalance(tx, toAccountId || sourceAccountId, amount)
+    } else if (type === 'transfer') {
+      await adjustBalance(tx, sourceAccountId, -amount)
+      await adjustBalance(tx, toAccountId, amount)
+    }
+
+    return created
   })
 
   // 创建时已选分类 → 触发自动学习
@@ -171,30 +219,60 @@ export async function updateTransaction(id: string, _prevState: unknown, formDat
     ? new Date(formData.get('transactionTime') as string)
     : undefined
   const categoryId = (formData.get('categoryId') as string) || null
-  const accountId = (formData.get('accountId') as string) || null
+  const sourceAccountId = (formData.get('sourceAccountId') as string) || null
+  const toAccountId = (formData.get('toAccountId') as string) || null
+  const channel = (formData.get('channel') as string) || null
   const ledgerIds = formData.getAll('ledgerIds') as string[]
 
   if (!amount || amount <= 0) {
     return { error: '请输入有效金额' }
   }
 
-  // 删除旧的账本关联，创建新的
-  await prisma.transactionLedger.deleteMany({ where: { transactionId: id } })
+  await prisma.$transaction(async (tx) => {
+    // 读取旧交易，回滚余额影响
+    const oldTransaction = await tx.transaction.findUnique({ where: { id } })
+    if (oldTransaction) {
+      if (oldTransaction.type === 'expense') {
+        await adjustBalance(tx, oldTransaction.sourceAccountId, oldTransaction.amount)
+      } else if (oldTransaction.type === 'income') {
+        await adjustBalance(tx, oldTransaction.toAccountId, -oldTransaction.amount)
+      } else if (oldTransaction.type === 'transfer') {
+        await adjustBalance(tx, oldTransaction.sourceAccountId, oldTransaction.amount)
+        await adjustBalance(tx, oldTransaction.toAccountId, -oldTransaction.amount)
+      }
+    }
 
-  await prisma.transaction.update({
-    where: { id },
-    data: {
-      type,
-      amount,
-      merchant,
-      description,
-      ...(transactionTime && { transactionTime }),
-      categoryId,
-      accountId,
-      transactionLedgers: {
-        create: ledgerIds.map((ledgerId) => ({ ledgerId })),
+    // 删除旧的账本关联
+    await tx.transactionLedger.deleteMany({ where: { transactionId: id } })
+
+    // 更新交易
+    await tx.transaction.update({
+      where: { id },
+      data: {
+        type,
+        amount,
+        merchant,
+        description,
+        ...(transactionTime && { transactionTime }),
+        categoryId,
+        sourceAccountId,
+        toAccountId,
+        channel,
+        transactionLedgers: {
+          create: ledgerIds.map((ledgerId) => ({ ledgerId })),
+        },
       },
-    },
+    })
+
+    // 应用新余额影响
+    if (type === 'expense') {
+      await adjustBalance(tx, sourceAccountId, -amount)
+    } else if (type === 'income') {
+      await adjustBalance(tx, toAccountId || sourceAccountId, amount)
+    } else if (type === 'transfer') {
+      await adjustBalance(tx, sourceAccountId, -amount)
+      await adjustBalance(tx, toAccountId, amount)
+    }
   })
 
   revalidatePath('/')
@@ -206,7 +284,22 @@ export async function deleteTransaction(id: string) {
   const user = await getSession()
   if (!user) throw new Error('Unauthorized')
 
-  await prisma.transaction.delete({ where: { id } })
+  await prisma.$transaction(async (tx) => {
+    // 读取交易，回滚余额
+    const transaction = await tx.transaction.findUnique({ where: { id } })
+    if (transaction) {
+      if (transaction.type === 'expense') {
+        await adjustBalance(tx, transaction.sourceAccountId, transaction.amount)
+      } else if (transaction.type === 'income') {
+        await adjustBalance(tx, transaction.toAccountId, -transaction.amount)
+      } else if (transaction.type === 'transfer') {
+        await adjustBalance(tx, transaction.sourceAccountId, transaction.amount)
+        await adjustBalance(tx, transaction.toAccountId, -transaction.amount)
+      }
+    }
+
+    await tx.transaction.delete({ where: { id } })
+  })
 
   revalidatePath('/')
   revalidatePath('/transactions')

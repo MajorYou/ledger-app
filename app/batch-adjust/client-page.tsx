@@ -3,7 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { parseNaturalLanguage, dryRunAdjust, executeAdjust } from '@/lib/actions/batch-adjust'
-import type { DryRunResult } from '@/lib/actions/batch-adjust'
+import type { DryRunResult, QueryTransaction } from '@/lib/actions/batch-adjust'
 
 interface CatItem { id: string; name: string; icon: string; type: string }
 interface LedgerItem { id: string; name: string }
@@ -42,6 +42,7 @@ export function BatchAdjustClient({
   const [done, setDone] = useState(false)
   const [editableTx, setEditableTx] = useState<NewTx[]>([])
   const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [queryResult, setQueryResult] = useState<{ reply: string; transactions?: QueryTransaction[] } | null>(null)
 
   const handleParse = async () => {
     if (!input.trim()) return
@@ -49,12 +50,19 @@ export function BatchAdjustClient({
     setParsing(true)
     setDryRun(null)
     setDone(false)
+    setQueryResult(null)
 
     const result = await parseNaturalLanguage(input)
     setParsing(false)
 
     if (!result.success) {
       setError(result.error)
+      return
+    }
+
+    // 查询模式
+    if (result.mode === 'query') {
+      setQueryResult({ reply: result.reply, transactions: result.transactions })
       return
     }
 
@@ -256,6 +264,32 @@ export function BatchAdjustClient({
       {done && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
           <p className="text-green-700 font-medium">✅ 批量调整完成</p>
+        </div>
+      )}
+
+      {queryResult && (
+        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+          <h3 className="font-semibold text-zinc-900 mb-2">🔍 查询结果</h3>
+          <p className="text-sm text-zinc-700 whitespace-pre-wrap mb-3">{queryResult.reply}</p>
+          {queryResult.transactions && queryResult.transactions.length > 0 && (
+            <div className="space-y-1 max-h-96 overflow-y-auto">
+              {queryResult.transactions.map((tx) => (
+                <div key={tx.id} className="flex items-center gap-3 py-2 border-b border-zinc-100 text-sm">
+                  <span className="text-zinc-400 w-24 shrink-0">
+                    {new Date(tx.transactionTime).toLocaleDateString('zh-CN')}
+                  </span>
+                  <span className="text-zinc-900 flex-1 truncate">{tx.merchant}</span>
+                  <span className="text-zinc-400 text-xs">{tx.categoryName}</span>
+                  <span className={tx.type === 'income' ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                    {tx.type === 'income' ? '+' : '-'}¥{tx.amount.toFixed(2)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {queryResult.transactions && queryResult.transactions.length === 0 && (
+            <p className="text-sm text-zinc-400">未找到匹配的交易记录</p>
+          )}
         </div>
       )}
     </div>

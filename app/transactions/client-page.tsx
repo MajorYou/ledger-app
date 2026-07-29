@@ -26,7 +26,7 @@ function filtersToParams(filters: TransactionFilters, sort: SortOption): URLSear
   const params = new URLSearchParams()
   if (filters.categoryId) params.set('category', filters.categoryId)
   if (filters.ledgerId) params.set('ledger', filters.ledgerId)
-  if (filters.accountId) params.set('account', filters.accountId)
+  if (filters.accountId) params.set('sourceAccount', filters.accountId)
   if (filters.dateFrom) params.set('dateFrom', filters.dateFrom)
   if (filters.dateTo) params.set('dateTo', filters.dateTo)
   if (filters.amountMin) params.set('amountMin', filters.amountMin)
@@ -41,7 +41,7 @@ function paramsToFilters(params: URLSearchParams): TransactionFilters {
   return {
     categoryId: params.get('category') || undefined,
     ledgerId: params.get('ledger') || undefined,
-    accountId: params.get('account') || undefined,
+    accountId: params.get('sourceAccount') || params.get('account') || undefined,
     dateFrom: params.get('dateFrom') || undefined,
     dateTo: params.get('dateTo') || undefined,
     amountMin: params.get('amountMin') || undefined,
@@ -89,7 +89,13 @@ export function ClientTransactionsPage({
     label: c.icon + ' ' + c.name,
     group: c.parentId ? '子分类' : undefined,
   }))
-  const accountOptions = accounts.map((a: any) => ({ value: a.id, label: a.name }))
+  const accountTypeEmoji: Record<string, string> = {
+    savings: '💳', credit: '💰', prepaid: '📱', investment: '📈', cash: '💵',
+  }
+  const accountOptions = accounts.map((a: any) => ({
+    value: a.id,
+    label: a.type ? `${accountTypeEmoji[a.type] || ''} ${a.name}` : a.name,
+  }))
   const ledgerOptions = ledgers.map((l: any) => ({ value: l.id, label: l.name }))
 
   // 更新筛选条件 → 同步 URL + 重置列表
@@ -214,7 +220,8 @@ export function ClientTransactionsPage({
     filterChips.push({ key: 'amountMin', label: `💰 ¥${min} ~ ¥${max}` })
   }
   if (filters.type && filters.type !== 'all') {
-    filterChips.push({ key: 'type', label: filters.type === 'expense' ? '支出' : '收入' })
+    const typeLabel = filters.type === 'expense' ? '支出' : filters.type === 'income' ? '收入' : '转账'
+    filterChips.push({ key: 'type', label: typeLabel })
   }
   if (filters.keyword) {
     filterChips.push({ key: 'keyword', label: `🔍 ${filters.keyword}` })
@@ -415,6 +422,7 @@ export function ClientTransactionsPage({
                     { value: 'all', label: '全部' },
                     { value: 'expense', label: '支出' },
                     { value: 'income', label: '收入' },
+                    { value: 'transfer', label: '转账' },
                   ].map((opt) => (
                     <button
                       key={opt.value}
@@ -545,14 +553,20 @@ export function ClientTransactionsPage({
                   </div>
                   <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-400">
                     <span>{formatDate(tx.transactionTime)}</span>
-                    {tx.account && <span>· {tx.account.name}</span>}
+                    {tx.type === 'transfer' && tx.sourceAccount && tx.toAccount ? (
+                      <span>· {tx.sourceAccount.name} → {tx.toAccount.name}</span>
+                    ) : tx.sourceAccount ? (
+                      <span>· {tx.sourceAccount.name}</span>
+                    ) : null}
                     {tx.category && <span className="text-zinc-500">· {tx.category.name}</span>}
                   </div>
                   {tx.description && <p className="text-xs text-zinc-400 mt-0.5 truncate">{tx.description}</p>}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-semibold whitespace-nowrap ${tx.type === 'income' ? 'text-green-500' : 'text-red-500'}`}>
-                    {tx.type === 'income' ? '+' : '-'}¥{Number(tx.amount).toFixed(2)}
+                  <span className={`text-sm font-semibold whitespace-nowrap ${
+                    tx.type === 'income' ? 'text-green-500' : tx.type === 'transfer' ? 'text-blue-500' : 'text-red-500'
+                  }`}>
+                    {tx.type === 'income' ? '+' : tx.type === 'transfer' ? '' : '-'}¥{Number(tx.amount).toFixed(2)}
                   </span>
                   <div className="hidden group-hover:flex items-center gap-1">
                     <button onClick={() => handleEdit(tx)} className="text-xs text-zinc-400 hover:text-blue-500 p-1">编辑</button>

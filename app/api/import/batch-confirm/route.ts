@@ -6,6 +6,8 @@ import { loadAgentSettings, findMatchingExpenses } from '@/lib/agent-settings'
 import { findDuplicates, DedupPair } from '@/lib/dedup'
 import { batchClassifyTransactions } from '@/lib/ai/classifier'
 import { logger } from '@/lib/logger'
+import { findOrCreateAccount } from '@/lib/account-mapper'
+import { safeParseDate } from '@/lib/date-utils'
 
 async function autoLearnCategory(merchant: string, categoryId: string): Promise<boolean> {
   const count = await prisma.transaction.count({
@@ -32,6 +34,9 @@ interface ImportItem {
   ledgerId?: string
   refundAction?: string
   deleteExpenseId?: string
+  paymentMethod?: string
+  channel?: string
+  externalOrderId?: string
 }
 
 export async function POST(request: NextRequest) {
@@ -223,6 +228,14 @@ export async function POST(request: NextRequest) {
     let totalLearned = 0
     let failCount = 0
 
+    // 预映射所有唯一的 paymentMethod
+    const paymentMethodMap = new Map<string, string | null>()
+    const uniqueMethods = [...new Set(items.map(i => i.paymentMethod).filter(Boolean))] as string[]
+    for (const method of uniqueMethods) {
+      const accountId = await findOrCreateAccount(user.id, method)
+      paymentMethodMap.set(method, accountId)
+    }
+
     for (const r of ruleResults) {
       const item = r.item
       const ledgerId = item.ledgerId || globalLedgerId
@@ -242,17 +255,8 @@ export async function POST(request: NextRequest) {
         }
 
         // 创建交易
-        let txTime: Date
-        if (item.transactionDate) {
-          if (item.transactionDate.includes('T')) {
-            txTime = new Date(item.transactionDate)
-          } else {
-            const [y, m, d] = item.transactionDate.slice(0, 10).split('-').map(Number)
-            txTime = new Date(y, m - 1, d)
-          }
-        } else {
-          txTime = new Date()
-        }
+        const txTime = item.transactionDate ? safeParseDate(item.transactionDate) : new Date()
+        const sourceAccountId = item.paymentMethod ? paymentMethodMap.get(item.paymentMethod) || null : null
         await prisma.transaction.create({
           data: {
             type: item.type || 'expense',
@@ -263,6 +267,9 @@ export async function POST(request: NextRequest) {
             categoryId: r.categoryId,
             createdById: user.id,
             isConfirmed: quickImport ? false : !!r.categoryId,
+            ...(sourceAccountId ? { sourceAccountId } : {}),
+            channel: item.channel || null,
+            externalOrderId: item.externalOrderId || null,
             ...(ledgerId ? {
               transactionLedgers: { create: { ledgerId } },
             } : {}),

@@ -108,15 +108,15 @@ export function SearchableSelect({
         disabled={disabled}
         onClick={() => setOpen(!open)}
         onKeyDown={handleKeyDown}
-        className={`w-full px-3 ${sizeClass} border border-zinc-300 rounded-lg text-left focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white flex items-center justify-between gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-          open ? 'ring-2 ring-blue-500' : ''
+        className={`w-full px-3 ${sizeClass} border-border rounded-md text-left focus:outline-none focus:ring-2 focus:ring-ring bg-card flex items-center justify-between gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+          open ? 'ring-2 ring-ring' : ''
         }`}
       >
-        <span className={`${selected ? 'text-zinc-900' : 'text-zinc-400'} truncate`}>
+        <span className={`${selected ? 'text-foreground' : 'text-muted-foreground'} truncate`}>
           {selected ? selected.label : placeholder}
         </span>
         <svg
-          className={`w-4 h-4 text-zinc-400 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          className={`w-4 h-4 text-muted-foreground shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
           fill="none" stroke="currentColor" viewBox="0 0 24 24"
         >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -124,9 +124,9 @@ export function SearchableSelect({
       </button>
 
       {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white rounded-lg border border-zinc-200 shadow-xl overflow-hidden">
+        <div className="absolute z-50 mt-1 w-full bg-card rounded-md border border-border shadow-xl overflow-hidden">
           {/* 搜索框 */}
-          <div className="p-2 border-b border-zinc-100">
+          <div className="p-2 border-b border-border">
             <input
               ref={inputRef}
               type="text"
@@ -134,14 +134,14 @@ export function SearchableSelect({
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.stopPropagation()}
               placeholder="搜索..."
-              className="w-full px-2 py-1.5 text-sm border border-zinc-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="w-full px-2 py-1.5 text-sm border border-border rounded-md focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
           {/* 选项列表 */}
           <div ref={listRef} className="max-h-48 overflow-y-auto">
             {filtered.length === 0 && (
-              <div className="px-3 py-4 text-sm text-zinc-400 text-center">无匹配选项</div>
+              <div className="px-3 py-4 text-sm text-muted-foreground text-center">无匹配选项</div>
             )}
 
             {/* 清除选择 */}
@@ -149,7 +149,7 @@ export function SearchableSelect({
               <button
                 type="button"
                 onClick={() => selectOption('')}
-                className="w-full text-left px-3 py-2 text-sm text-zinc-400 hover:bg-zinc-50 border-b border-zinc-100"
+                className="w-full text-left px-3 py-2 text-sm text-muted-foreground hover:bg-muted border-b border-border"
               >
                 ✕ 清除选择
               </button>
@@ -158,18 +158,18 @@ export function SearchableSelect({
             {/* 最近使用 */}
             {recentOptions.length > 0 && (
               <div>
-                <div className="px-3 py-1 text-xs text-blue-500 font-medium bg-blue-50/60">🕐 最近使用</div>
+                <div className="px-3 py-1 text-xs text-primary font-medium bg-primary/10">🕐 最近使用</div>
                 {recentOptions.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
                     onClick={() => selectOption(opt.value)}
-                    className={`w-full text-left px-5 py-2 text-sm hover:bg-blue-50 transition-colors flex items-center gap-2 ${
-                      opt.value === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-zinc-700'
+                    className={`w-full text-left px-5 py-2 text-sm hover:bg-primary/10 transition-colors flex items-center gap-2 ${
+                      opt.value === value ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
                     }`}
                   >
                     <span className="flex-1 truncate">{opt.label}</span>
-                    {opt.group && <span className="text-[10px] text-zinc-400 shrink-0">{opt.group}</span>}
+                    {opt.group && <span className="text-[10px] text-muted-foreground shrink-0">{opt.group}</span>}
                   </button>
                 ))}
               </div>
@@ -178,14 +178,14 @@ export function SearchableSelect({
             {/* 分组选项 */}
             {[...grouped.entries()].map(([group, opts]) => (
               <div key={group}>
-                <div className="px-3 py-1 text-xs text-zinc-400 font-medium bg-zinc-50">{group}</div>
+                <div className="px-3 py-1 text-xs text-muted-foreground font-medium bg-muted">{group}</div>
                 {opts.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
                     onClick={() => selectOption(opt.value)}
-                    className={`w-full text-left px-5 py-2 text-sm hover:bg-blue-50 transition-colors ${
-                      opt.value === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-zinc-700'
+                    className={`w-full text-left px-5 py-2 text-sm hover:bg-primary/10 transition-colors ${
+                      opt.value === value ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
                     }`}
                   >
                     {opt.label}
@@ -200,8 +200,8 @@ export function SearchableSelect({
                 key={opt.value}
                 type="button"
                 onClick={() => selectOption(opt.value)}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 transition-colors ${
-                  opt.value === value ? 'bg-blue-50 text-blue-700 font-medium' : 'text-zinc-700'
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-primary/10 transition-colors ${
+                  opt.value === value ? 'bg-primary/10 text-primary font-medium' : 'text-foreground'
                 }`}
               >
                 {opt.label}

@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
       duplicateChecks,
       message: items.length > 0
         ? `解析成功：${items.length} 条记录${duplicateCount > 0 ? `，检测到 ${duplicateCount} 笔疑似重复` : ''}`
-        : `未识别到交易记录。文本已接收（${text.length} 字），但未匹配到交易格式。请确认是招行信用卡账单`
+        : `未识别到交易记录。文本已接收（${text.length} 字），但未匹配到交易格式。请检查账单格式是否正确`
     })
   } catch (error) {
     logger.error('import:error', {

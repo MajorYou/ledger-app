@@ -21,7 +21,7 @@ export async function parseBillText(rawText: string): Promise<ParsedBillItem[]> 
 
     const textSample = rawText.substring(0, 4000)
 
-    const prompt = `从招行信用卡账单文本提取交易，只返回JSON数组：
+    const prompt = `从招商银行储蓄卡/信用卡账单文本提取交易，只返回JSON数组：
 ${textSample}
 
 格式：[{"transactionDate":"2026-07-09","postDate":"2026-07-10","description":"原始描述","merchant":"商户名（去掉财付通-/支付宝-等前缀）","amount":100,"type":"expense","category":"消费","currency":"CNY"}]

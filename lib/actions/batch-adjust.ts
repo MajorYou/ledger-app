@@ -7,6 +7,9 @@ import { getSession } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import { revalidatePath } from 'next/cache'
 import { quickCreateCategory } from './categories'
+import { loadAgentSettings } from '@/lib/agent-settings'
+import { allPageMetadata, ALLOWED_REDIRECT_PATHS, AI_CAPABILITIES } from '@/lib/ai-capabilities'
+import { loadUserRules, matchRule, parseAction } from '@/lib/user-rules'
 
 interface NewTransaction {
   merchant: string
@@ -28,6 +31,7 @@ interface ParsedOperation {
     merchant?: string
     type?: 'expense' | 'income'
     keyword?: string
+    targetIds?: string[]
   }
   operations: Array<{
     type: 'move_ledger' | 'reclassify' | 'update_type' | 'update_merchant' | 'create_transaction' | 'delete_transactions' | 'duplicate_transaction'
@@ -42,6 +46,17 @@ interface ParsedOperation {
   explanation: string
 }
 
+export interface ConversationContext {
+  previousQueryTransactions?: Array<{
+    id: string
+    merchant: string
+    amount: number
+    categoryName: string
+    date: string
+  }>
+  turnCount?: number
+}
+
 export interface QueryTransaction {
   id: string
   merchant: string
@@ -53,8 +68,10 @@ export interface QueryTransaction {
 }
 
 export type ParseResult =
-  | { success: true; mode: 'operation'; parsed: ParsedOperation }
-  | { success: true; mode: 'query'; reply: string; transactions?: QueryTransaction[] }
+  | { success: true; mode: 'operation'; parsed: ParsedOperation; confidence: number }
+  | { success: true; mode: 'query'; reply: string; transactions?: QueryTransaction[]; confidence: number }
+  | { success: true; mode: 'unsupported'; message: string; redirect: string; confidence: number }
+  | { success: true; mode: 'clarify'; reply: string; suggestions: string[]; confidence: number }
   | { success: false; error: string }
 
 async function getAIClient(): Promise<OpenAI | null> {
@@ -65,17 +82,116 @@ async function getAIClient(): Promise<OpenAI | null> {
 }
 
 export async function parseNaturalLanguage(
-  input: string
+  input: string,
+  context?: ConversationContext
 ): Promise<ParseResult> {
   const client = await getAIClient()
   if (!client) {
     return { success: false, error: '未配置 AI API Key' }
   }
 
-  const [categories, ledgers] = await Promise.all([
+  const session = await getSession()
+
+  const [categories, ledgers, agentSettings] = await Promise.all([
     prisma.category.findMany({ select: { id: true, name: true, type: true } }),
     prisma.ledger.findMany({ select: { id: true, name: true } }),
+    loadAgentSettings(),
   ])
+
+  // ========== 模板匹配（优先级最高） ==========
+  if (session) {
+    const templates = await prisma.operationTemplate.findMany({
+      where: { userId: session.id, isActive: true },
+    })
+    
+    for (const template of templates) {
+      try {
+        const phrases: string[] = JSON.parse(template.triggerPhrases)
+        const inputLower = input.toLowerCase().trim()
+        
+        // 精确匹配优先，仅当触发词长度 >= 3 时才允许 includes 匹配
+        const matched = phrases.some(phrase => {
+          const pl = phrase.toLowerCase()
+          return inputLower === pl || (pl.length >= 3 && inputLower.includes(pl))
+        })
+        
+        if (matched) {
+          const operations = JSON.parse(template.operations)
+          // 校验 operations 结构：必须是数组且每个元素有 type 字段
+          if (!Array.isArray(operations) || !operations.every((op: { type?: string }) => op.type)) {
+            continue  // 跳过格式异常的模板
+          }
+          logger.info('batch-adjust:template-matched', { templateId: template.id, name: template.name })
+          return {
+            success: true,
+            mode: 'operation',
+            parsed: {
+              filters: {},
+              operations,
+              explanation: `已匹配模板「${template.name}」`,
+            },
+            confidence: 1.0,
+          }
+        }
+      } catch {
+        continue
+      }
+    }
+  }
+
+  // ========== 用户规则匹配 ==========
+  if (session) {
+    const rules = await loadUserRules(session.id)
+    
+    // 尝试从输入中提取商户信息用于规则匹配
+    // 简单启发式：查找常见模式如“在XX”、“XX花了”等
+    const merchantMatch = input.match(/在(.+?)(?:花了|消费|买了|吃了|用了)/) ||
+                          input.match(/(.+?)(?:花了|消费|买了|吃了|用了)/)
+    const merchant = merchantMatch ? merchantMatch[1].trim() : undefined
+    
+    // 提取金额（用于匹配 amount 字段规则）
+    const amountMatch = input.match(/(\d+(?:\.\d+)?)\s*(?:块|元|¥)?/)
+    const amount = amountMatch ? Number(amountMatch[1]) : undefined
+    
+    // 构建用于规则匹配的交易对象
+    const transactionForMatch = { merchant, amount, description: input }
+    
+    if (merchant || amount) {
+      const matched = matchRule(rules, transactionForMatch)
+      if (matched) {
+        const action = matched.action
+        logger.info('batch-adjust:rule-matched', { ruleId: matched.rule.id, name: matched.rule.name })
+        
+        // 将规则动作转换为操作
+        const operations: ParsedOperation['operations'] = []
+        
+        if (action.type === 'reclassify' && action.params.categoryName) {
+          operations.push({
+            type: 'create_transaction',
+            newTransactions: [{
+              merchant: merchant || '未识别',
+              amount: amount ?? 0, // 需要用户补充
+              type: 'expense',
+              categoryName: action.params.categoryName,
+            }],
+          })
+        }
+        
+        if (operations.length > 0) {
+          return {
+            success: true,
+            mode: 'operation',
+            parsed: {
+              filters: {},
+              operations,
+              explanation: `已匹配用户规则「${matched.rule.name}」`,
+            },
+            confidence: 0.9,
+          }
+        }
+      }
+    }
+  }
 
   const model = (await getSetting('DEEPSEEK_MODEL')) || 'deepseek-chat'
 
@@ -83,6 +199,25 @@ export async function parseNaturalLanguage(
   const todayStr = now.toISOString().slice(0, 10)
   const yesterdayStr = new Date(now.getTime() - 86400000).toISOString().slice(0, 10)
   const dayBeforeStr = new Date(now.getTime() - 2 * 86400000).toISOString().slice(0, 10)
+
+  // 构建上下文注入块
+  let contextBlock = ''
+  if (context?.previousQueryTransactions && context.previousQueryTransactions.length > 0) {
+    const txs = context.previousQueryTransactions.slice(0, 20)
+    const txList = txs.map((tx, i) => 
+      `${i + 1}. ID: ${tx.id}, 商户: ${tx.merchant}, 金额: ¥${tx.amount.toFixed(2)}, 分类: ${tx.categoryName}, 日期: ${tx.date}`
+    ).join('\n')
+    contextBlock = `
+
+[对话上下文]
+上一轮查询到 ${context.previousQueryTransactions.length} 笔交易：
+${txList}
+
+如果用户的消息涉及"它们"、"这些"、"上一笔"、"上面那些"等指代词，指的是上述交易。
+如果用户要求修改/删除/分类等操作且使用了"它们"等指代词，应在 filters 中使用 targetIds 字段，值为上述交易的 ID 列表。
+[/对话上下文]
+`
+  }
 
   const prompt = `你是一个记账批量操作解析器。将用户的自然语言指令解析为结构化操作。
 
@@ -95,13 +230,17 @@ export async function parseNaturalLanguage(
 【重要】如果用户提到的账本或分类不在上述列表中，你应该自动创建新的。对于 reclassify 操作，即使分类不存在也可以直接指定名称，系统会自动创建。对于 move_ledger 操作，即使账本不存在也可以直接指定名称，系统会自动创建。
 
 用户指令：「${input}」
-
+${contextBlock}
 首先判断意图类型：
 - 如果用户是在"记录/添加/花了/收入"一笔新交易 → operations 用 create_transaction
 - 如果用户是在"修改/调整/移动/归类"已有交易 → operations 用 move_ledger/reclassify 等
 
-请返回 JSON：
+请返回 JSON（注意：所有模式都必须在顶层包含 "confidence" 字段）：
+
+### 操作/查询模式
 {
+  "mode": "operation" 或 "query",
+  "confidence": 0.0-1.0（你对解析结果的确定程度：1.0=完全确定，0.7=基本确定，0.5=不太确定，0.3=很不确定）,
   "filters": {
     "dateRange": { "start": "YYYY-MM-DD", "end": "YYYY-MM-DD" } 或 null,
     "amountRange": { "min": 数字, "max": 数字 } 或 null,
@@ -109,7 +248,8 @@ export async function parseNaturalLanguage(
     "ledgerName": "账本名" 或 null,
     "merchant": "商户名" 或 null,
     "type": "expense"|"income" 或 null,
-    "keyword": "关键词" 或 null
+    "keyword": "关键词" 或 null,
+    "targetIds": ["id1", "id2"] 或 null（当上下文中有交易 ID 列表且用户使用了"它们"等指代时，填入对应交易 ID）
   },
   "operations": [
     {
@@ -128,13 +268,14 @@ export async function parseNaturalLanguage(
           "type": "expense"|"income",
           "categoryName": "分类名（必须选子分类，不要选父分类）",
           "ledgerName": "账本名",
-          "accountName": "支付账户名（可选，如\"余额宝\"、\"微信零钱\"、\"招商银行储蓄卡(9496)\"）",
+          "accountName": "支付账户名（可选，如"余额宝"、"微信零钱"、"招商银行储蓄卡(9496)"）",
           "transactionTime": "YYYY-MM-DDTHH:mm" 或 null(表示现在)
         }
       ]
     }
   ],
-  "explanation": "用中文一句话解释你理解的操作"
+  "reply": "查询模式的文字回复（仅 query 模式需要）",
+  "explanation": "操作模式的中文解释（仅 operation 模式需要）"
 }
 
 新增交易解析规则：
@@ -203,11 +344,49 @@ export async function parseNaturalLanguage(
 - reply 是你对用户的文字回复
 - filters 是可选的，如果你需要根据某些交易数据来回答，提供 filters 让系统查询匹配的交易
 - 你可以基于查询到的交易数据来组织 reply 内容
-- 示例：用户问"检查7.18前几天的记录" → { "mode": "query", "reply": "以下是7.15-7.17的交易记录：", "filters": { "dateRange": { "start": "2025-07-15", "end": "2025-07-17" } } }`
+- 示例：用户问"检查7.18前几天的记录" → { "mode": "query", "reply": "以下是7.15-7.17的交易记录：", "filters": { "dateRange": { "start": "2025-07-15", "end": "2025-07-17" } } }
+
+## 本应用的功能页面
+
+以下是这个记账 App 的所有功能页面。你需要据此判断用户的请求你是否能直接处理：
+
+${allPageMetadata.map(f => `- **${f.name}**（${f.path}）：${f.description}${f.aiAction === 'direct' ? ' ← 你可以直接帮用户操作' : ' ← 你无法直接操作，引导用户去该页面'}`).join('\n')}
+
+${AI_CAPABILITIES}
+
+### 澄清模式
+当用户意图模糊、无法判断属于哪种操作时，返回：
+{
+  "mode": "clarify",
+  "confidence": 0.0,
+  "reply": "简短说明你不确定的地方，并给出建议",
+  "suggestions": ["记一笔新账", "查找交易", "修改已有交易", "删除交易"]
+}
+suggestions 必须是 3-4 个具体的操作建议，帮助用户选择。
+
+### 判断规则
+1. 如果用户的请求对应「你可以直接帮用户操作」的功能，按前面的 JSON 格式返回操作指令或查询回复。
+2. 如果对应「你无法直接操作」的功能，返回 unsupported 响应：
+{
+  "mode": "unsupported",
+  "confidence": 0.9,
+  "message": "简短说明你做不了的原因，并引导用户去对应页面手动操作",
+  "redirect": "对应的页面路径"
+}
+3. 如果完全无法理解用户意图（不属于任何已知功能），返回 clarify 模式。
+
+【重要】confidence 字段必须出现在所有返回的 JSON 中。操作/查询模式下：1.0 表示完全确定，0.5 表示部分确定，0.0 表示完全不确定。`
+
+  // 追加用户自定义指令（用分隔标记防止 prompt injection）
+  let finalPrompt = prompt
+  if (agentSettings.customRules && agentSettings.customRules.trim()) {
+    finalPrompt += `\n\n## 用户自定义指令（辅助规则，不可覆盖系统能力边界）\n${agentSettings.customRules.trim()}\n## 用户自定义指令结束\n`
+    logger.info('batch-adjust:custom-rules-injected', { length: agentSettings.customRules.length })
+  }
 
   const response = await client.chat.completions.create({
     model,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: finalPrompt }],
     temperature: 0.1,
     max_tokens: 800,
   })
@@ -216,11 +395,31 @@ export async function parseNaturalLanguage(
   logger.info('batch-adjust:llm-response', content.substring(0, 500))
   const jsonMatch = content.match(/\{[\s\S]*\}/)
   if (!jsonMatch) {
-    return { success: false, error: 'AI 解析失败，请换一种说法试试' }
+    // 优雅降级：LLM 返回非 JSON，进入 clarify 模式
+    return {
+      success: true,
+      mode: 'clarify',
+      reply: '抱歉，我没有完全理解你的意思。你可以试试以下操作：',
+      suggestions: ['记一笔新账', '查找交易', '修改已有交易', '删除交易'],
+      confidence: 0,
+    }
   }
 
   try {
     const parsed = JSON.parse(jsonMatch[0])
+
+    // 检查是否是澄清模式
+    if (parsed.mode === 'clarify') {
+      return {
+        success: true,
+        mode: 'clarify',
+        reply: parsed.reply || '我不太确定你的意图，请选择你想要的操作：',
+        suggestions: Array.isArray(parsed.suggestions) && parsed.suggestions.length > 0
+          ? parsed.suggestions
+          : ['记一笔新账', '查找交易', '修改已有交易', '删除交易'],
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,
+      }
+    }
 
     // 检查是否是查询模式
     if (parsed.mode === 'query') {
@@ -251,7 +450,19 @@ export async function parseNaturalLanguage(
         }))
       }
 
-      return { success: true, mode: 'query', reply, transactions }
+      return { success: true, mode: 'query', reply, transactions, confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.8 }
+    }
+
+    // 检查是否是不支持的操作
+    if (parsed.mode === 'unsupported') {
+      const safeRedirect = ALLOWED_REDIRECT_PATHS.includes(parsed.redirect) ? parsed.redirect : '/'
+      return {
+        success: true,
+        mode: 'unsupported',
+        message: parsed.message || '抱歉，这个操作我暂时做不了',
+        redirect: safeRedirect,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.8,
+      }
     }
 
     // 操作模式：必须有 operations 数组
@@ -277,10 +488,17 @@ export async function parseNaturalLanguage(
         op.newMerchant = op.newValue
       }
     }
-    return { success: true, mode: 'operation', parsed: parsed as ParsedOperation }
+    return { success: true, mode: 'operation', parsed: parsed as ParsedOperation, confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.8 }
   } catch (e) {
     logger.error('batch-adjust:parse-error', { raw: content.substring(0, 300), error: String(e) })
-    return { success: false, error: 'AI 返回格式异常，请换一种说法或稍后重试' }
+    // 优雅降级：JSON 解析失败，进入 clarify 模式
+    return {
+      success: true,
+      mode: 'clarify',
+      reply: 'AI 返回格式异常，我不太确定你想做什么。你可以试试：',
+      suggestions: ['记一笔新账', '查找交易', '修改已有交易', '删除交易'],
+      confidence: 0,
+    }
   }
 }
 
@@ -303,6 +521,20 @@ export interface DryRunResult {
 
 async function buildWhereClause(filters: ParsedOperation['filters']): Promise<Record<string, unknown>> {
   const where: Record<string, unknown> = {}
+
+  // 优先按 targetIds 匹配（多轮对话中通过 ID 精确指定交易）
+  if (filters.targetIds && filters.targetIds.length > 0) {
+    // 校验 targetIds：确保是字符串数组，过滤空字符串，校验 cuid 格式
+    const validIds = Array.isArray(filters.targetIds)
+      ? filters.targetIds.filter((id): id is string => typeof id === 'string' && id.length > 0 && /^c[a-z0-9]{24}$/.test(id))
+      : []
+    if (validIds.length > 0) {
+      where.id = { in: validIds }
+      return where
+    }
+    // 如果过滤后没有有效 ID，记录警告并继续走其他筛选条件
+    logger.warn('batch-adjust:invalid-targetIds', { targetIds: filters.targetIds })
+  }
 
   if (filters.dateRange) {
     const [sy, sm, sd] = filters.dateRange.start.slice(0, 10).split('-').map(Number)

@@ -52,7 +52,7 @@ export function LedgerCRUD({
             setEditing(null)
             setShowForm(true)
           }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
         >
           + 新建账本
         </button>
@@ -96,7 +96,7 @@ export function LedgerCRUD({
           </div>
         ))}
         {ledgers.length === 0 && (
-          <p className="text-center text-zinc-400 py-8">暂无账本</p>
+          <p className="text-center text-muted-foreground py-8">暂无账本</p>
         )}
       </div>
     </div>
@@ -113,15 +113,15 @@ function LedgerItem({
   onDelete: () => void
 }) {
   return (
-    <div className="bg-white rounded-xl border border-zinc-200 p-4 flex items-center justify-between hover:shadow-sm transition-shadow">
+    <div className="bg-card rounded-md border border-border p-4 flex items-center justify-between hover:shadow-sm transition-shadow">
       <div className="flex items-center gap-3">
         <div
           className="w-3 h-3 rounded-full"
           style={{ backgroundColor: item.color }}
         />
         <div>
-          <p className="font-medium text-zinc-900">{item.name}</p>
-          <p className="text-xs text-zinc-400">
+          <p className="font-medium text-foreground">{item.name}</p>
+          <p className="text-xs text-muted-foreground">
             {LEDGER_TYPES[item.type] || item.type}
             {item._count.transactionLedgers > 0 &&
               ` · ${item._count.transactionLedgers} 笔交易`}
@@ -131,13 +131,13 @@ function LedgerItem({
       <div className="flex items-center gap-2">
         <button
           onClick={onEdit}
-          className="text-xs text-zinc-400 hover:text-blue-500"
+          className="text-xs text-muted-foreground hover:text-primary"
         >
           编辑
         </button>
         <button
           onClick={onDelete}
-          className="text-xs text-zinc-400 hover:text-red-500"
+          className="text-xs text-muted-foreground hover:text-destructive"
         >
           删除
         </button>
@@ -169,12 +169,12 @@ function LedgerForm({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+      <div className="bg-card rounded-lg shadow-xl w-full max-w-sm p-6 border border-border">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">
             {editing ? '编辑账本' : '新建账本'}
           </h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 text-xl">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl">
             ✕
           </button>
         </div>
@@ -183,21 +183,21 @@ function LedgerForm({
           className="space-y-4"
         >
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">名称</label>
+            <label className="block text-sm font-medium text-foreground mb-1">名称</label>
             <input
               name="name"
               defaultValue={editing?.name || ''}
               required
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="账本名称"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">类型</label>
+            <label className="block text-sm font-medium text-foreground mb-1">类型</label>
             <select
               name="type"
               defaultValue={editing?.type || 'daily'}
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring bg-card"
             >
               {Object.entries(LEDGER_TYPES).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>
@@ -205,7 +205,7 @@ function LedgerForm({
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">颜色</label>
+            <label className="block text-sm font-medium text-foreground mb-1">颜色</label>
             <div className="flex gap-2">
               {COLORS.map((c) => (
                 <label key={c}>
@@ -217,7 +217,7 @@ function LedgerForm({
                     className="sr-only peer"
                   />
                   <div
-                    className="w-8 h-8 rounded-full cursor-pointer border-2 border-transparent peer-checked:border-zinc-900"
+                    className="w-8 h-8 rounded-full cursor-pointer border-2 border-transparent peer-checked:border-foreground"
                     style={{ backgroundColor: c }}
                   />
                 </label>
@@ -225,13 +225,13 @@ function LedgerForm({
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
+            <label className="block text-sm font-medium text-foreground mb-1">
               父账本
             </label>
             <select
               name="parentId"
               defaultValue={editing?.parentId || ''}
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring bg-card"
             >
               <option value="">无（顶级账本）</option>
               {parentOptions
@@ -244,7 +244,7 @@ function LedgerForm({
           <button
             type="submit"
             disabled={isPending}
-            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="w-full py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
             {isPending ? '保存中...' : (editing ? '更新' : '创建')}
           </button>

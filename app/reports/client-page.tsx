@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTheme } from 'next-themes'
 import type { ReportData } from './page'
 
 interface CatItem { name: string; icon: string; color: string; type: string; amount: number; count: number }
@@ -21,6 +22,12 @@ const PERIODS = [
   { value: 'custom', label: '自定义' },
 ]
 
+// 图表颜色常量
+const chartColors = {
+  light: { bar: '#3445db', text: '#6b7085', grid: '#e2e5ed', income: '#22c55e', expense: '#ef4444' },
+  dark: { bar: '#6366f1', text: '#8b8fa3', grid: '#2a2d3e', income: '#4ade80', expense: '#f87171' },
+}
+
 // 简易水平条图
 function BarChart({
   data,
@@ -35,17 +42,17 @@ function BarChart({
     <div className="space-y-2">
       {data.map((item) => (
         <div key={item.name} className="flex items-center gap-2 text-sm">
-          <span className="w-20 text-right text-zinc-500 truncate">{item.name}</span>
-          <div className="flex-1 h-5 bg-zinc-100 rounded-full overflow-hidden">
+          <span className="w-20 text-right text-muted-foreground truncate">{item.name}</span>
+          <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full rounded-full transition-all"
+              className="h-full rounded-full transition-all hover:opacity-80"
               style={{
                 width: `${maxValue > 0 ? (item.value / maxValue) * 100 : 0}%`,
                 backgroundColor: item.color,
               }}
             />
           </div>
-          <span className="w-20 text-zinc-700 font-medium">
+          <span className="w-20 text-foreground font-medium font-mono">
             {formatValue ? formatValue(item.value) : `¥${item.value.toFixed(0)}`}
           </span>
         </div>
@@ -62,6 +69,8 @@ function ColumnChart({
   data: Array<{ label: string; expense: number; income: number }>
   maxValue: number
 }) {
+  const { resolvedTheme } = useTheme()
+  const colors = resolvedTheme === 'dark' ? chartColors.dark : chartColors.light
   const w = 300
   const h = 120
   const pad = 25
@@ -70,7 +79,7 @@ function ColumnChart({
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-auto">
       {/* 基线 */}
-      <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="#e4e4e7" />
+      <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke={colors.grid} />
       {data.map((d, i) => {
         const x = pad + ((w - pad * 2) / data.length) * i + ((w - pad * 2) / data.length - barW * 2) / 2
         const expH = maxValue > 0 ? (d.expense / maxValue) * (h - pad * 2) : 0
@@ -82,23 +91,25 @@ function ColumnChart({
               y={h - pad - expH}
               width={barW}
               height={expH}
-              fill="#ef4444"
+              fill={colors.expense}
               rx={2}
+              className="transition-all duration-300 ease-out hover:opacity-80"
             />
             <rect
               x={x + barW}
               y={h - pad - incH}
               width={barW}
               height={incH}
-              fill="#22c55e"
+              fill={colors.income}
               rx={2}
+              className="transition-all duration-300 ease-out hover:opacity-80"
             />
             <text
               x={x + barW}
               y={h - 5}
               textAnchor="middle"
-              className="text-[10px]"
-              fill="#71717a"
+              className="text-[10px] transition-fill duration-200"
+              fill={colors.text}
             >
               {d.label}
             </text>
@@ -106,10 +117,10 @@ function ColumnChart({
         )
       })}
       {/* 图例 */}
-      <rect x={w - 80} y={5} width={10} height={10} fill="#ef4444" rx={2} />
-      <text x={w - 66} y={14} className="text-[10px]" fill="#71717a">支出</text>
-      <rect x={w - 42} y={5} width={10} height={10} fill="#22c55e" rx={2} />
-      <text x={w - 28} y={14} className="text-[10px]" fill="#71717a">收入</text>
+      <rect x={w - 80} y={5} width={10} height={10} fill={colors.expense} rx={2} />
+      <text x={w - 66} y={14} className="text-[10px] transition-fill duration-200" fill={colors.text}>支出</text>
+      <rect x={w - 42} y={5} width={10} height={10} fill={colors.income} rx={2} />
+      <text x={w - 28} y={14} className="text-[10px] transition-fill duration-200" fill={colors.text}>收入</text>
     </svg>
   )
 }
@@ -124,7 +135,7 @@ function CrossTable({
   viewMode: CrossViewMode
 }) {
   if (data.length === 0) {
-    return <p className="text-sm text-zinc-400 py-8 text-center">暂无交叉数据</p>
+    return <p className="text-sm text-muted-foreground py-8 text-center">暂无交叉数据</p>
   }
 
   const isByLedger = viewMode === 'by-ledger'
@@ -191,15 +202,15 @@ function CrossTable({
     grandIncome += item.income
   }
 
-  const cellClass = "px-3 py-2 text-sm text-right whitespace-nowrap border-b border-r border-zinc-100"
-  const headerClass = "px-3 py-2 text-sm font-medium text-zinc-600 bg-zinc-50 border-b border-r border-zinc-200 whitespace-nowrap"
+  const cellClass = "px-3 py-2 text-sm text-right whitespace-nowrap border-b border-r border-border font-mono"
+  const headerClass = "px-3 py-2 text-sm font-medium text-muted-foreground bg-muted border-b border-r border-border whitespace-nowrap"
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th className={`${headerClass} text-left sticky left-0 z-10 bg-zinc-50 min-w-[100px]`}>
+            <th className={`${headerClass} text-left sticky left-0 z-10 bg-muted min-w-[100px]`}>
               {isByLedger ? '账本' : '分类'}
             </th>
             {cols.map(([cKey, cInfo]) => (
@@ -210,15 +221,15 @@ function CrossTable({
                 </span>
               </th>
             ))}
-            <th className={`${headerClass} text-right bg-zinc-100 font-semibold`}>合计</th>
+            <th className={`${headerClass} text-right bg-muted font-semibold`}>合计</th>
           </tr>
         </thead>
         <tbody>
           {rows.map(([rKey, rInfo]) => {
             const rt = rowTotals.get(rKey) || { expense: 0, income: 0 }
             return (
-              <tr key={rKey} className="hover:bg-zinc-50/50">
-                <td className={`${cellClass} text-left font-medium sticky left-0 z-10 bg-white min-w-[100px]`}>
+              <tr key={rKey} className="hover:bg-muted/50">
+                <td className={`${cellClass} text-left font-medium sticky left-0 z-10 bg-card min-w-[100px]`}>
                   <span className="flex items-center gap-1.5">
                     <span
                       className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0"
@@ -232,28 +243,28 @@ function CrossTable({
                   return (
                     <td key={cKey} className={cellClass}>
                       {val.expense === 0 && val.income === 0 ? (
-                        <span className="text-zinc-300">—</span>
+                        <span className="text-muted-foreground">—</span>
                       ) : val.expense > 0 && val.income > 0 ? (
                         <div className="flex flex-col items-end gap-0.5">
-                          <span className="text-red-500 text-xs">-¥{val.expense.toFixed(2)}</span>
-                          <span className="text-green-500 text-xs">+¥{val.income.toFixed(2)}</span>
+                          <span className="text-destructive text-xs">-¥{val.expense.toFixed(2)}</span>
+                          <span className="text-green-600 dark:text-green-400 text-xs">+¥{val.income.toFixed(2)}</span>
                         </div>
                       ) : val.expense > 0 ? (
-                        <span className="text-red-500">-¥{val.expense.toFixed(2)}</span>
+                        <span className="text-destructive">-¥{val.expense.toFixed(2)}</span>
                       ) : (
-                        <span className="text-green-500">+¥{val.income.toFixed(2)}</span>
+                        <span className="text-green-600 dark:text-green-400">+¥{val.income.toFixed(2)}</span>
                       )}
                     </td>
                   )
                 })}
                 {/* 行合计 */}
-                <td className={`${cellClass} bg-zinc-50/70 font-medium`}>
+                <td className={`${cellClass} bg-muted/70 font-medium`}>
                   {rt.expense === 0 && rt.income === 0 ? (
-                    <span className="text-zinc-300">—</span>
+                    <span className="text-muted-foreground">—</span>
                   ) : (
                     <div className="flex flex-col items-end gap-0.5">
-                      {rt.expense > 0 && <span className="text-red-500 text-xs">-¥{rt.expense.toFixed(2)}</span>}
-                      {rt.income > 0 && <span className="text-green-500 text-xs">+¥{rt.income.toFixed(2)}</span>}
+                      {rt.expense > 0 && <span className="text-destructive text-xs">-¥{rt.expense.toFixed(2)}</span>}
+                      {rt.income > 0 && <span className="text-green-600 dark:text-green-400 text-xs">+¥{rt.income.toFixed(2)}</span>}
                     </div>
                   )}
                 </td>
@@ -261,28 +272,28 @@ function CrossTable({
             )
           })}
           {/* 列合计行 */}
-          <tr className="bg-zinc-50 font-semibold">
-            <td className={`${cellClass} sticky left-0 z-10 bg-zinc-100 font-semibold`}>合计</td>
+          <tr className="bg-muted font-semibold">
+            <td className={`${cellClass} sticky left-0 z-10 bg-muted font-semibold`}>合计</td>
             {cols.map(([cKey]) => {
               const ct = colTotals.get(cKey) || { expense: 0, income: 0 }
               return (
-                <td key={cKey} className={`${cellClass} bg-zinc-50`}>
+                <td key={cKey} className={`${cellClass} bg-muted`}>
                   {ct.expense === 0 && ct.income === 0 ? (
-                    <span className="text-zinc-300">—</span>
+                    <span className="text-muted-foreground">—</span>
                   ) : (
                     <div className="flex flex-col items-end gap-0.5">
-                      {ct.expense > 0 && <span className="text-red-500 text-xs">-¥{ct.expense.toFixed(2)}</span>}
-                      {ct.income > 0 && <span className="text-green-500 text-xs">+¥{ct.income.toFixed(2)}</span>}
+                      {ct.expense > 0 && <span className="text-destructive text-xs">-¥{ct.expense.toFixed(2)}</span>}
+                      {ct.income > 0 && <span className="text-green-600 dark:text-green-400 text-xs">+¥{ct.income.toFixed(2)}</span>}
                     </div>
                   )}
                 </td>
               )
             })}
             {/* 总计 */}
-            <td className={`${cellClass} bg-zinc-100 font-bold`}>
+            <td className={`${cellClass} bg-muted font-bold`}>
               <div className="flex flex-col items-end gap-0.5">
-                {grandExpense > 0 && <span className="text-red-500 text-xs">-¥{grandExpense.toFixed(2)}</span>}
-                {grandIncome > 0 && <span className="text-green-500 text-xs">+¥{grandIncome.toFixed(2)}</span>}
+                {grandExpense > 0 && <span className="text-destructive text-xs">-¥{grandExpense.toFixed(2)}</span>}
+                {grandIncome > 0 && <span className="text-green-600 dark:text-green-400 text-xs">+¥{grandIncome.toFixed(2)}</span>}
               </div>
             </td>
           </tr>
@@ -339,7 +350,7 @@ export function ReportsClient({
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div className="w-full space-y-6">
       {/* 时间筛选 + 总额 */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex gap-2 items-center flex-wrap">
@@ -349,8 +360,8 @@ export function ReportsClient({
               onClick={() => handlePeriodChange(p.value)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 currentPeriod === p.value
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                  ? 'bg-primary text-white'
+                  : 'bg-muted text-muted-foreground hover:bg-muted'
               }`}
             >
               {p.label}
@@ -362,19 +373,19 @@ export function ReportsClient({
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="px-2 py-1 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="px-2 py-1 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
               />
-              <span className="text-zinc-400">~</span>
+              <span className="text-muted-foreground">~</span>
               <input
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="px-2 py-1 text-sm border border-zinc-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                className="px-2 py-1 text-sm border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <button
                 onClick={handleCustomDateApply}
                 disabled={!customStart || !customEnd}
-                className="px-3 py-1 text-sm bg-blue-600 text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-blue-700 transition-colors"
+                className="px-3 py-1 text-sm bg-primary text-white rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary transition-colors"
               >
                 查询
               </button>
@@ -383,14 +394,14 @@ export function ReportsClient({
         </div>
         <div className="flex gap-6 text-right">
           <div>
-            <p className="text-xs text-zinc-400">总支出</p>
-            <p className="text-lg font-bold text-red-500">
+            <p className="text-xs text-muted-foreground">总支出</p>
+            <p className="text-lg font-bold font-mono text-destructive">
               ¥{data.totalExpense.toFixed(2)}
             </p>
           </div>
           <div>
-            <p className="text-xs text-zinc-400">总收入</p>
-            <p className="text-lg font-bold text-green-500">
+            <p className="text-xs text-muted-foreground">总收入</p>
+            <p className="text-lg font-bold font-mono text-green-600 dark:text-green-400">
               ¥{data.totalIncome.toFixed(2)}
             </p>
           </div>
@@ -398,13 +409,13 @@ export function ReportsClient({
       </div>
 
       {/* Tab 切换 */}
-      <div className="flex gap-1 border-b border-zinc-200">
+      <div className="flex gap-1 border-b border-border">
         <button
           onClick={() => setActiveTab('summary')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
             activeTab === 'summary'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-zinc-500 hover:text-zinc-700'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           汇总概览
@@ -413,8 +424,8 @@ export function ReportsClient({
           onClick={() => setActiveTab('cross')}
           className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
             activeTab === 'cross'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-zinc-500 hover:text-zinc-700'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           交叉汇总
@@ -424,17 +435,17 @@ export function ReportsClient({
       {activeTab === 'summary' ? (
         <>
           {/* 月度趋势 */}
-          <div className="bg-white rounded-xl border border-zinc-200 p-5">
-            <h3 className="font-semibold text-zinc-900 mb-3">月度趋势</h3>
+          <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+            <h3 className="font-semibold text-foreground mb-3">月度趋势</h3>
             <ColumnChart data={data.monthTrend} maxValue={maxMonth} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* 支出分类 */}
-            <div className="bg-white rounded-xl border border-zinc-200 p-5">
-              <h3 className="font-semibold text-zinc-900 mb-3">支出分类</h3>
+            <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+              <h3 className="font-semibold text-foreground mb-3">支出分类</h3>
               {expenseByCat.length === 0 ? (
-                <p className="text-sm text-zinc-400 py-4">暂无数据</p>
+                <p className="text-sm text-muted-foreground py-4">暂无数据</p>
               ) : (
                 <BarChart
                   data={expenseByCat.map((c) => ({
@@ -448,10 +459,10 @@ export function ReportsClient({
             </div>
 
             {/* 收入分类 */}
-            <div className="bg-white rounded-xl border border-zinc-200 p-5">
-              <h3 className="font-semibold text-zinc-900 mb-3">收入分类</h3>
+            <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+              <h3 className="font-semibold text-foreground mb-3">收入分类</h3>
               {incomeByCat.length === 0 ? (
-                <p className="text-sm text-zinc-400 py-4">暂无数据</p>
+                <p className="text-sm text-muted-foreground py-4">暂无数据</p>
               ) : (
                 <BarChart
                   data={incomeByCat.map((c) => ({
@@ -465,10 +476,10 @@ export function ReportsClient({
             </div>
 
             {/* 账本维度 */}
-            <div className="bg-white rounded-xl border border-zinc-200 p-5">
-              <h3 className="font-semibold text-zinc-900 mb-3">账本支出</h3>
+            <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+              <h3 className="font-semibold text-foreground mb-3">账本支出</h3>
               {data.ledgerBreakdown.length === 0 ? (
-                <p className="text-sm text-zinc-400 py-4">暂无数据</p>
+                <p className="text-sm text-muted-foreground py-4">暂无数据</p>
               ) : (
                 <BarChart
                   data={data.ledgerBreakdown.map((l: LedgerItem) => ({
@@ -482,27 +493,27 @@ export function ReportsClient({
             </div>
 
             {/* 账户维度 */}
-            <div className="bg-white rounded-xl border border-zinc-200 p-5">
-              <h3 className="font-semibold text-zinc-900 mb-3">支付账户</h3>
+            <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+              <h3 className="font-semibold text-foreground mb-3">支付账户</h3>
               {data.accountBreakdown.length === 0 ? (
-                <p className="text-sm text-zinc-400 py-4">暂无数据</p>
+                <p className="text-sm text-muted-foreground py-4">暂无数据</p>
               ) : (
                 <div className="space-y-3">
                   {data.accountBreakdown.map((a: AccountItem, i: number) => (
                     <div key={i} className="text-sm">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-zinc-700 font-medium">{a.name}</span>
+                        <span className="text-foreground font-medium">{a.name}</span>
                         <div className="flex gap-3 text-xs">
-                          {a.expense > 0 && <span className="text-red-500">支出 ¥{a.expense.toFixed(2)}</span>}
-                          {a.income > 0 && <span className="text-green-500">收入 ¥{a.income.toFixed(2)}</span>}
+                          {a.expense > 0 && <span className="text-destructive font-mono">支出 ¥{a.expense.toFixed(2)}</span>}
+                          {a.income > 0 && <span className="text-green-600 dark:text-green-400 font-mono">收入 ¥{a.income.toFixed(2)}</span>}
                         </div>
                       </div>
-                      <div className="flex gap-1 h-3 bg-zinc-100 rounded-full overflow-hidden">
+                      <div className="flex gap-1 h-3 bg-muted rounded-full overflow-hidden">
                         {a.expense > 0 && (
-                          <div className="h-full bg-red-400 rounded-l-full" style={{ width: `${(a.expense / a.amount) * 100}%` }} />
+                          <div className="h-full bg-destructive/60 rounded-l-full" style={{ width: `${(a.expense / a.amount) * 100}%` }} />
                         )}
                         {a.income > 0 && (
-                          <div className="h-full bg-green-400 rounded-r-full" style={{ width: `${(a.income / a.amount) * 100}%` }} />
+                          <div className="h-full bg-green-500/60 rounded-r-full" style={{ width: `${(a.income / a.amount) * 100}%` }} />
                         )}
                       </div>
                     </div>
@@ -514,16 +525,16 @@ export function ReportsClient({
         </>
       ) : (
         /* 交叉汇总 Tab */
-        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+        <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-zinc-900">交叉汇总（账本 × 分类）</h3>
-            <div className="flex gap-1 bg-zinc-100 rounded-lg p-0.5">
+            <h3 className="font-semibold text-foreground">交叉汇总（账本 × 分类）</h3>
+            <div className="flex gap-1 bg-muted rounded-lg p-0.5">
               <button
                 onClick={() => setCrossViewMode('by-ledger')}
                 className={`px-3 py-1 text-xs rounded-md transition-colors ${
                   crossViewMode === 'by-ledger'
-                    ? 'bg-white text-zinc-800 shadow-sm font-medium'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                    ? 'bg-card text-foreground shadow-sm font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 按账本展开
@@ -532,8 +543,8 @@ export function ReportsClient({
                 onClick={() => setCrossViewMode('by-category')}
                 className={`px-3 py-1 text-xs rounded-md transition-colors ${
                   crossViewMode === 'by-category'
-                    ? 'bg-white text-zinc-800 shadow-sm font-medium'
-                    : 'text-zinc-500 hover:text-zinc-700'
+                    ? 'bg-card text-foreground shadow-sm font-medium'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 按分类展开

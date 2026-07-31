@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { getSession } from '@/lib/auth'
 import Link from 'next/link'
+import { Package } from 'lucide-react'
 
 export default async function DashboardPage() {
   const user = await getSession()
@@ -67,24 +68,24 @@ export default async function DashboardPage() {
   const categoryMap = new Map(categories.map((c) => [c.id, c]))
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+    <div className="w-full space-y-6">
       {/* 概览卡片 */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl border border-zinc-200 p-5">
-          <p className="text-sm text-zinc-500 mb-1">本月支出</p>
-          <p className="text-2xl font-bold text-red-500">
+        <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+          <p className="text-sm text-muted-foreground mb-1">本月支出</p>
+          <p className="text-2xl font-bold font-mono text-destructive">
             ¥{monthExpense._sum.amount?.toFixed(2) || '0.00'}
           </p>
         </div>
-        <div className="bg-white rounded-xl border border-zinc-200 p-5">
-          <p className="text-sm text-zinc-500 mb-1">本月收入</p>
-          <p className="text-2xl font-bold text-green-500">
+        <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+          <p className="text-sm text-muted-foreground mb-1">本月收入</p>
+          <p className="text-2xl font-bold font-mono text-green-600 dark:text-green-400">
             ¥{monthIncome._sum.amount?.toFixed(2) || '0.00'}
           </p>
         </div>
-        <div className="bg-white rounded-xl border border-zinc-200 p-5">
-          <p className="text-sm text-zinc-500 mb-1">本月交易</p>
-          <p className="text-2xl font-bold text-zinc-900">
+        <div className="bg-card rounded-md border border-border p-5 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200">
+          <p className="text-sm text-muted-foreground mb-1">本月交易</p>
+          <p className="text-2xl font-bold font-mono text-foreground">
             {monthCount} 笔
           </p>
         </div>
@@ -92,8 +93,8 @@ export default async function DashboardPage() {
 
       {/* 分类支出排名 */}
       {categoryBreakdown.length > 0 && (
-        <div className="bg-white rounded-xl border border-zinc-200 p-5">
-          <h2 className="font-semibold text-zinc-900 mb-4">本月支出分类</h2>
+        <div className="bg-card rounded-md border border-border p-5">
+          <h2 className="font-semibold text-foreground mb-4">本月支出分类</h2>
           <div className="space-y-2">
             {categoryBreakdown.slice(0, 10).map((item) => {
               const cat = categoryMap.get(item.categoryId!)
@@ -103,11 +104,11 @@ export default async function DashboardPage() {
               return (
                 <div key={item.categoryId} className="flex items-center gap-3">
                   <span className="text-lg">{cat.icon}</span>
-                  <span className="text-sm text-zinc-700 flex-1">{cat.name}</span>
-                  <span className="text-sm font-medium text-zinc-900">
+                  <span className="text-sm text-foreground flex-1">{cat.name}</span>
+                  <span className="text-sm font-medium font-mono text-foreground">
                     ¥{item._sum.amount?.toFixed(2)}
                   </span>
-                  <div className="w-24 h-2 bg-zinc-100 rounded-full overflow-hidden">
+                  <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full"
                       style={{
@@ -124,18 +125,18 @@ export default async function DashboardPage() {
       )}
 
       {/* 最近交易 */}
-      <div className="bg-white rounded-xl border border-zinc-200 p-5">
+      <div className="bg-card rounded-md border border-border p-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-zinc-900">最近交易</h2>
+          <h2 className="font-semibold text-foreground">最近交易</h2>
           <Link
             href="/transactions"
-            className="text-sm text-blue-600 hover:underline"
+            className="text-sm text-primary hover:underline"
           >
             查看全部
           </Link>
         </div>
         {recentTransactions.length === 0 ? (
-          <p className="text-sm text-zinc-400 text-center py-8">
+          <p className="text-sm text-muted-foreground text-center py-8">
             暂无交易记录，开始记账吧！
           </p>
         ) : (
@@ -143,14 +144,14 @@ export default async function DashboardPage() {
             {recentTransactions.map((tx) => (
               <div
                 key={tx.id}
-                className="flex items-center gap-3 py-2.5 border-b border-zinc-100 last:border-0"
+                className="flex items-center gap-3 py-2.5 border-b border-border last:border-0"
               >
-                <span className="text-lg">{tx.category?.icon || '📦'}</span>
+                <span className="text-lg">{tx.category?.icon || <Package className="inline h-5 w-5" />}</span>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-zinc-900 truncate">
+                  <p className="text-sm font-medium text-foreground truncate">
                     {tx.merchant || tx.description || '未命名'}
                   </p>
-                  <p className="text-xs text-zinc-400">
+                  <p className="text-xs text-muted-foreground">
                     {tx.transactionTime.toLocaleDateString('zh-CN')}
                     {tx.type === 'transfer' && tx.sourceAccount && tx.toAccount
                       ? ` · ${tx.sourceAccount.name} → ${tx.toAccount.name}`
@@ -160,8 +161,8 @@ export default async function DashboardPage() {
                   </p>
                 </div>
                 <span
-                  className={`text-sm font-semibold ${
-                    tx.type === 'income' ? 'text-green-500' : tx.type === 'transfer' ? 'text-blue-500' : 'text-red-500'
+                  className={`text-sm font-semibold font-mono ${
+                    tx.type === 'income' ? 'text-green-600 dark:text-green-400' : tx.type === 'transfer' ? 'text-primary' : 'text-destructive'
                   }`}
                 >
                   {tx.type === 'income' ? '+' : tx.type === 'transfer' ? '' : '-'}¥{tx.amount.toFixed(2)}

@@ -4,6 +4,7 @@ import { createTransaction, updateTransaction } from '@/lib/actions/transactions
 import { quickCreateCategory } from '@/lib/actions/categories'
 import { useActionState, useState, useEffect, useCallback, useMemo } from 'react'
 import { SearchableSelect } from '@/components/searchable-select'
+import { ArrowDownRight, Wallet, Repeat, Bot, Lightbulb } from 'lucide-react'
 
 interface Category {
   id: string
@@ -103,14 +104,14 @@ export function TransactionForm({
   const incomeCategories = localCategories.filter((c) => c.type === 'income')
   const visibleCategories = type === 'expense' ? expenseCategories : incomeCategories
 
-  // 账户类型 emoji 映射
-  const accountTypeEmoji: Record<string, string> = {
-    savings: '💳',
-    credit: '💰',
-    prepaid: '📱',
-    investment: '📈',
-    cash: '💵',
-  }
+  // 账户类型映射
+  const accountOptions = useMemo(
+    () => accounts.map((a) => ({
+      value: a.id,
+      label: a.name,
+    })),
+    [accounts]
+  )
 
   // 构建可搜索下拉的选项
   const categoryOptions = useMemo(() => {
@@ -125,14 +126,6 @@ export function TransactionForm({
     }
     return opts
   }, [visibleCategories])
-
-  const accountOptions = useMemo(
-    () => accounts.map((a) => ({
-      value: a.id,
-      label: a.type ? `${accountTypeEmoji[a.type] || ''} ${a.name}` : a.name,
-    })),
-    [accounts]
-  )
 
   const toggleLedger = (id: string) => {
     setSelectedLedgerIds((prev) =>
@@ -211,42 +204,42 @@ export function TransactionForm({
     <form action={formAction} className="space-y-4">
       {/* 类型选择 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-2">
+        <label className="block text-sm font-medium text-foreground mb-2">
           类型
         </label>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => setType('expense')}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
               type === 'expense'
                 ? 'bg-red-100 text-red-700 border-2 border-red-300'
-                : 'bg-zinc-100 text-zinc-600 border-2 border-transparent'
+                : 'bg-muted text-muted-foreground border-2 border-transparent'
             }`}
           >
-            💸 支出
+            <ArrowDownRight className="inline h-4 w-4 mr-1" />支出
           </button>
           <button
             type="button"
             onClick={() => setType('income')}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
               type === 'income'
                 ? 'bg-green-100 text-green-700 border-2 border-green-300'
-                : 'bg-zinc-100 text-zinc-600 border-2 border-transparent'
+                : 'bg-muted text-muted-foreground border-2 border-transparent'
             }`}
           >
-            💰 收入
+            <Wallet className="inline h-4 w-4 mr-1" />收入
           </button>
           <button
             type="button"
             onClick={() => setType('transfer')}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
               type === 'transfer'
                 ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                : 'bg-zinc-100 text-zinc-600 border-2 border-transparent'
+                : 'bg-muted text-muted-foreground border-2 border-transparent'
             }`}
           >
-            🔄 转账
+            <Repeat className="inline h-4 w-4 mr-1" />转账
           </button>
         </div>
         <input type="hidden" name="type" value={type} />
@@ -254,7 +247,7 @@ export function TransactionForm({
 
       {/* 金额 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           金额
         </label>
         <input
@@ -264,42 +257,42 @@ export function TransactionForm({
           required
           value={amountStr}
           onChange={(e) => setAmountStr(e.target.value)}
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border-border rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
           placeholder="0.00"
         />
       </div>
 
       {/* 商户 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           商户/备注
         </label>
         <input
           name="merchant"
           type="text"
           defaultValue={transaction?.merchant || ''}
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           placeholder="例如：星巴克"
         />
       </div>
 
       {/* 描述 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           详细描述
         </label>
         <input
           name="description"
           type="text"
           defaultValue={transaction?.description || ''}
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           placeholder="可选"
         />
       </div>
 
       {/* 日期 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           日期
         </label>
         <input
@@ -314,14 +307,14 @@ export function TransactionForm({
               return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
             })()
           }
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
 
       {/* 分类 */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <label className="text-sm font-medium text-zinc-700">
+          <label className="text-sm font-medium text-foreground">
             分类
           </label>
           <button
@@ -330,7 +323,7 @@ export function TransactionForm({
             disabled={classifying}
             className="text-xs text-purple-600 hover:text-purple-700 disabled:opacity-50 font-medium"
           >
-            {classifying ? '🤖 分析中...' : '🤖 AI 分类'}
+            {classifying ? <><Bot className="inline h-3 w-3 mr-1" />分析中...</> : <><Bot className="inline h-3 w-3 mr-1" />AI 分类</>}
           </button>
         </div>
         <SearchableSelect
@@ -341,20 +334,20 @@ export function TransactionForm({
         />
         <input type="hidden" name="categoryId" value={selectedCategoryId} />
         {classifyError && (
-          <p className="mt-1 text-xs text-red-500">{classifyError}</p>
+          <p className="mt-1 text-xs text-destructive">{classifyError}</p>
         )}
         {classifyResult && (
-          <div className="mt-2 p-2 bg-purple-50 rounded-lg text-xs">
+          <div className="mt-2 p-2 bg-purple-50 rounded-md text-xs">
             <p className="text-purple-700">
-              🤖 AI 建议: {classifyResult.reason}
+              <Bot className="inline h-3 w-3 mr-1" />AI 建议: {classifyResult.reason}
               <span className="ml-1 text-purple-400">
                 (置信度: {Math.round(classifyResult.confidence * 100)}%)
               </span>
             </p>
             {classifyResult.suggestNewCategory && classifyResult.newCategoryName && (
-              <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+              <div className="mt-2 p-2.5 bg-amber-50 border border-amber-200 rounded-md">
                 <p className="text-amber-800 font-medium">
-                  💡 AI 建议创建新分类：{classifyResult.newCategoryName}
+                  <Lightbulb className="inline h-3 w-3 mr-1" />AI 建议创建新分类：{classifyResult.newCategoryName}
                   {classifyResult.suggestedParentName && (
                     <span className="font-normal">（父分类：{classifyResult.suggestedParentName}）</span>
                   )}
@@ -365,7 +358,7 @@ export function TransactionForm({
                   disabled={creatingCategory || !classifyResult.suggestedParentId}
                   className="mt-1.5 px-3 py-1 bg-amber-500 text-white rounded-md text-xs font-medium hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {creatingCategory ? '⏳ 创建中...' : '+ 创建并使用此分类'}
+                  {creatingCategory ? '创建中...' : '+ 创建并使用此分类'}
                 </button>
               </div>
             )}
@@ -376,7 +369,7 @@ export function TransactionForm({
       {/* 账户选择区域 - 根据交易类型动态展示 */}
       {type === 'expense' && (
         <div>
-          <label className="block text-sm font-medium text-zinc-700 mb-1">
+          <label className="block text-sm font-medium text-foreground mb-1">
             支出账户
           </label>
           <SearchableSelect
@@ -390,7 +383,7 @@ export function TransactionForm({
       )}
       {type === 'income' && (
         <div>
-          <label className="block text-sm font-medium text-zinc-700 mb-1">
+          <label className="block text-sm font-medium text-foreground mb-1">
             收入账户
           </label>
           <SearchableSelect
@@ -405,7 +398,7 @@ export function TransactionForm({
       {type === 'transfer' && (
         <>
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
+            <label className="block text-sm font-medium text-foreground mb-1">
               转出账户
             </label>
             <SearchableSelect
@@ -417,7 +410,7 @@ export function TransactionForm({
             <input type="hidden" name="sourceAccountId" value={sourceAccountId} />
           </div>
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
+            <label className="block text-sm font-medium text-foreground mb-1">
               转入账户
             </label>
             <SearchableSelect
@@ -433,14 +426,14 @@ export function TransactionForm({
 
       {/* 支付通道 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           支付通道
         </label>
         <select
           name="channel"
           value={channel}
           onChange={(e) => setChannel(e.target.value)}
-          className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-2 border-border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         >
           <option value="">不指定</option>
           <option value="支付宝">支付宝</option>
@@ -453,7 +446,7 @@ export function TransactionForm({
 
       {/* 账本 */}
       <div>
-        <label className="block text-sm font-medium text-zinc-700 mb-1">
+        <label className="block text-sm font-medium text-foreground mb-1">
           关联账本
         </label>
         <div className="flex flex-wrap gap-2">
@@ -462,10 +455,10 @@ export function TransactionForm({
               key={ledger.id}
               type="button"
               onClick={() => toggleLedger(ledger.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                 selectedLedgerIds.includes(ledger.id)
                   ? 'bg-blue-100 text-blue-700 border-2 border-blue-300'
-                  : 'bg-zinc-100 text-zinc-600 border-2 border-transparent'
+                  : 'bg-muted text-muted-foreground border-2 border-transparent'
               }`}
             >
               {ledger.name}
@@ -478,13 +471,13 @@ export function TransactionForm({
       </div>
 
       {state?.error && (
-        <p className="text-sm text-red-500">{state.error}</p>
+        <p className="text-sm text-destructive">{state.error}</p>
       )}
 
       <button
         type="submit"
         disabled={isPending}
-        className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        className="w-full py-2.5 bg-gradient-to-r from-[#34dbcb] to-[#3445db] text-white rounded-md text-sm font-medium hover:from-[#2bc4b6] hover:to-[#2d3bc4] disabled:opacity-50 transition-colors"
       >
         {isPending ? '保存中...' : isEdit ? '更新' : '添加交易'}
       </button>

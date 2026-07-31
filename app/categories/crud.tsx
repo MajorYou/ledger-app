@@ -52,7 +52,7 @@ export function CategoryCRUD({
             setEditing(null)
             setShowForm(true)
           }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
         >
           + 新建分类
         </button>
@@ -73,7 +73,7 @@ export function CategoryCRUD({
       <div className="space-y-6">
         {/* 支出分类 */}
         <div>
-          <h2 className="text-sm font-semibold text-red-500 mb-3">支出分类</h2>
+          <h2 className="text-sm font-semibold text-destructive mb-3">支出分类</h2>
           <CategoryList
             categories={expenseCategories}
             onEdit={(item) => { setEditing(item); setShowForm(true) }}
@@ -84,7 +84,7 @@ export function CategoryCRUD({
 
         {/* 收入分类 */}
         <div>
-          <h2 className="text-sm font-semibold text-green-500 mb-3">收入分类</h2>
+          <h2 className="text-sm font-semibold text-green-600 mb-3">收入分类</h2>
           <CategoryList
             categories={incomeCategories}
             onEdit={(item) => { setEditing(item); setShowForm(true) }}
@@ -123,7 +123,7 @@ function CategoryList({
         </div>
       ))}
       {categories.length === 0 && (
-        <p className="text-sm text-zinc-400 py-4">暂无分类</p>
+        <p className="text-sm text-muted-foreground py-4">暂无分类</p>
       )}
     </div>
   )
@@ -139,7 +139,7 @@ function CategoryItemRow({
   onDelete: (id: string) => void
 }) {
   return (
-    <div className="flex items-center justify-between py-2.5 px-3 bg-white rounded-lg border border-zinc-100 hover:shadow-sm transition-shadow">
+    <div className="flex items-center justify-between py-2.5 px-3 bg-card rounded-md border border-border hover:shadow-sm transition-shadow">
       <div className="flex items-center gap-2">
         <span className="text-lg">{item.icon}</span>
         <span
@@ -149,7 +149,7 @@ function CategoryItemRow({
           {item.name}
         </span>
         {item._count.transactions > 0 && (
-          <span className="text-xs text-zinc-400">
+          <span className="text-xs text-muted-foreground">
             {item._count.transactions} 笔
           </span>
         )}
@@ -157,13 +157,13 @@ function CategoryItemRow({
       <div className="flex items-center gap-2">
         <button
           onClick={() => onEdit(item)}
-          className="text-xs text-zinc-400 hover:text-blue-500"
+          className="text-xs text-muted-foreground hover:text-primary"
         >
           编辑
         </button>
         <button
           onClick={() => onDelete(item.id)}
-          className="text-xs text-zinc-400 hover:text-red-500"
+          className="text-xs text-muted-foreground hover:text-destructive"
         >
           删除
         </button>
@@ -197,12 +197,12 @@ function CategoryForm({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+      <div className="bg-card rounded-lg shadow-xl w-full max-w-sm p-6 border border-border">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">
             {editing ? '编辑分类' : '新建分类'}
           </h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 text-xl">
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl">
             ✕
           </button>
         </div>
@@ -214,22 +214,22 @@ function CategoryForm({
           <input type="hidden" name="color" value={selectedColor} />
 
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">名称</label>
+            <label className="block text-sm font-medium text-foreground mb-1">名称</label>
             <input
               name="name"
               defaultValue={editing?.name || ''}
               required
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               placeholder="分类名称"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">类型</label>
+            <label className="block text-sm font-medium text-foreground mb-1">类型</label>
             <select
               name="type"
               defaultValue={editing?.type || 'expense'}
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring bg-card"
             >
               <option value="expense">支出</option>
               <option value="income">收入</option>
@@ -237,7 +237,7 @@ function CategoryForm({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">图标</label>
+            <label className="block text-sm font-medium text-foreground mb-1">图标</label>
             <div className="flex flex-wrap gap-1">
               {ICONS.map((icon) => (
                 <button
@@ -245,7 +245,7 @@ function CategoryForm({
                   type="button"
                   onClick={() => setSelectedIcon(icon)}
                   className={`text-xl p-1 rounded ${
-                    selectedIcon === icon ? 'bg-blue-100 ring-2 ring-blue-300' : ''
+                    selectedIcon === icon ? 'bg-primary/10 ring-2 ring-primary/30' : ''
                   }`}
                 >
                   {icon}
@@ -255,7 +255,7 @@ function CategoryForm({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">颜色</label>
+            <label className="block text-sm font-medium text-foreground mb-1">颜色</label>
             <div className="flex gap-2">
               {COLORS.map((c) => (
                 <label key={c}>
@@ -271,7 +271,7 @@ function CategoryForm({
                     className="w-7 h-7 rounded-full cursor-pointer border-2"
                     style={{
                       backgroundColor: c,
-                      borderColor: selectedColor === c ? '#18181b' : 'transparent',
+                      borderColor: selectedColor === c ? 'var(--foreground)' : 'transparent',
                     }}
                   />
                 </label>
@@ -280,13 +280,13 @@ function CategoryForm({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
+            <label className="block text-sm font-medium text-foreground mb-1">
               父分类
             </label>
             <select
               name="parentId"
               defaultValue={editing?.parentId || ''}
-              className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-ring bg-card"
             >
               <option value="">无（顶级分类）</option>
               {parentOptions
@@ -302,7 +302,7 @@ function CategoryForm({
           <button
             type="submit"
             disabled={isPending}
-            className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            className="w-full py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
           >
             {isPending ? '保存中...' : editing ? '更新' : '创建'}
           </button>

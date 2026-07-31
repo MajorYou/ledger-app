@@ -7,7 +7,7 @@ export function LogoutButton() {
     <form action={logout}>
       <button
         type="submit"
-        className="text-sm text-zinc-400 hover:text-red-500 transition-colors"
+        className="text-sm text-muted-foreground hover:text-destructive transition-colors"
       >
         退出
       </button>

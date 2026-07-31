@@ -2,6 +2,7 @@
 
 import { saveSettings } from '@/lib/actions/settings'
 import { useState } from 'react'
+import { Lightbulb } from 'lucide-react'
 
 const SETTING_FIELDS = [
   {
@@ -46,18 +47,18 @@ export function SettingsForm({
       {SETTING_FIELDS.map((field) => (
         <div
           key={field.key}
-          className="bg-white rounded-xl border border-zinc-200 p-5"
+          className="bg-card rounded-md border border-border p-5"
         >
-          <label className="block text-sm font-semibold text-zinc-900 mb-1">
+          <label className="block text-sm font-semibold text-foreground mb-1">
             {field.label}
           </label>
-          <p className="text-xs text-zinc-400 mb-3">{field.description}</p>
+          <p className="text-xs text-muted-foreground mb-3">{field.description}</p>
           <input
             name={field.key}
             type={field.type}
             defaultValue={settings[field.key] || ''}
             placeholder={field.placeholder}
-            className="w-full px-3 py-2 border border-zinc-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 border border-border rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
       ))}
@@ -65,18 +66,18 @@ export function SettingsForm({
       <div className="flex items-center gap-4">
         <button
           type="submit"
-          className="px-6 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="px-6 py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors"
         >
           保存设置
         </button>
         {saved && (
-          <span className="text-sm text-green-600">✓ 已保存</span>
+          <span className="text-sm text-green-600 dark:text-green-400">✓ 已保存</span>
         )}
       </div>
 
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-        <p className="text-sm text-amber-700">
-          💡 提示：修改 API 配置后，新的交易记录将使用新配置进行分类。已有缓存不受影响。
+      <div className="bg-muted border border-border rounded-md p-4">
+        <p className="text-sm text-muted-foreground">
+          <Lightbulb className="inline h-4 w-4 mr-1" /> 提示：修改 API 配置后，新的交易记录将使用新配置进行分类。已有缓存不受影响。
         </p>
       </div>
     </form>

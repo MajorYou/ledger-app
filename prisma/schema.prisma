@@ -157,6 +157,37 @@ model ClassificationCache {
   @@unique([merchantPattern])
 }
 
+// ---- 用户规则引擎 ----
+model UserRule {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String   // 规则名称，如"食堂归三餐"
+  condition String   // JSON: { field: "merchant", operator: "contains", value: "食堂" }
+  action    String   // JSON: { type: "reclassify", params: { categoryName: "三餐" } }
+  priority  Int      @default(0)  // 优先级，数字越大越优先
+  isActive  Boolean  @default(true)
+  source    String   @default("manual") // 'auto' | 'manual'
+  confidence Float   @default(1.0) // 置信度，自动学习的规则会随纠正次数变化
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@index([userId])
+}
+
+// ---- 操作模板 ----
+model OperationTemplate {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String   // 模板名称，如"月度固定支出"
+  triggerPhrases String  // JSON 数组: ["月度固定支出", "记固定支出", "每月固定开支"]
+  operations    String   // JSON 数组: 每笔交易的操作定义
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([userId])
+}
+
 // ---- 系统设置（键值对） ----
 model Setting {
   id        String   @id @default(cuid())

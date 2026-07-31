@@ -18,8 +18,8 @@ export default async function BatchAdjustPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
-      <h1 className="text-xl font-bold text-zinc-900 mb-2">批量调整</h1>
-      <p className="text-sm text-zinc-500 mb-6">
+      <h1 className="text-xl font-bold text-foreground mb-2">批量调整</h1>
+      <p className="text-sm text-muted-foreground mb-6">
         用自然语言描述批量操作或新增交易，AI 解析后预览确认再执行
       </p>
       <BatchAdjustClient

@@ -1,9 +1,10 @@
 import { parseBillText as parseCmbPdf } from './pdf-parser'
+import { parseSavingsPdf } from './savings-pdf-parser'
 import { parseAlipayCsv } from './alipay-parser'
 import { parseWechatCsv } from './wechat-parser'
 import type { ParsedBillItem } from './types'
 
-export type BillFormat = 'alipay-csv' | 'wechat-csv' | 'cmb-pdf' | 'unknown'
+export type BillFormat = 'alipay-csv' | 'wechat-csv' | 'cmb-pdf' | 'cmb-savings-pdf' | 'unknown'
 
 export function detectFormat(text: string): BillFormat {
   if (text.includes('支付宝交易明细') || text.includes('支付宝支付科技有限公司')) {
@@ -19,6 +20,10 @@ export function detectFormat(text: string): BillFormat {
   if (text.includes('交易时间') && text.includes('交易类型') &&
       text.includes('收/支') && text.includes('支付方式')) {
     return 'wechat-csv'
+  }
+  // 招行储蓄卡交易流水（必须在 cmb-pdf 之前，因为储蓄卡也包含"招商"关键字）
+  if (text.includes('招商银行交易流水') || text.includes('Transaction Statement of China Merchants Bank')) {
+    return 'cmb-savings-pdf'
   }
   // 其他（可能是 PDF 文本）→ cmb-pdf
   return 'cmb-pdf'
@@ -79,6 +84,7 @@ export async function parseBillTextAuto(text: string): Promise<ParsedBillItem[]>
     case 'alipay-csv': items = parseAlipayCsv(text); break
     case 'wechat-csv': items = parseWechatCsv(text); break
     case 'cmb-pdf': items = await parseCmbPdf(text); break
+    case 'cmb-savings-pdf': items = await parseSavingsPdf(text); break
     default: return []
   }
   return mergeCombinedPayments(items)
